@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   actionLabel,
+  checkpointLabel,
   errText,
+  isSafetyCheckpoint,
   fromLocalInput,
   isCode,
   lessonApi,
@@ -36,11 +38,6 @@ const CHECKPOINT_PRESETS = ['elbow_alignment', 'release_timing', 'knee_valgus', 
 const editable = computed(() => lesson.value?.status === 'PLANNED')
 const actionOptions = computed(() => [...new Set([...ACTION_PRESETS, ...form.value.actionTypes])])
 const checkpointOptions = computed(() => [...new Set([...CHECKPOINT_PRESETS, ...form.value.enabledCheckpoints])])
-
-/** 安全类检查点的启发式标记（词表未开放时按 ID 关键词判断） */
-function isSafety(id) {
-  return /knee|valgus|land|safety|ankle/i.test(id)
-}
 
 function toggleAction(a) {
   if (!editable.value) return
@@ -212,8 +209,9 @@ onMounted(load)
           <div class="panel soft" style="overflow: hidden">
             <div v-for="c in checkpointOptions" :key="c" class="cp-row">
               <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                <span class="cp-name">{{ c }}</span>
-                <span v-if="isSafety(c)" class="safety-tag">安全</span>
+                <span class="cp-name">{{ checkpointLabel(c) }}</span>
+                <span class="cp-id">{{ c }}</span>
+                <span v-if="isSafetyCheckpoint(c)" class="safety-tag">安全</span>
               </div>
               <button
                 class="switch"
@@ -309,7 +307,13 @@ onMounted(load)
 .cp-name {
   font-size: 15px;
   font-weight: 600;
-  font-family: var(--mono);
+}
+.cp-id {
+  font: 500 11px/1 var(--mono);
+  color: var(--gray-2);
+  background: var(--fill-2);
+  border-radius: 6px;
+  padding: 3px 7px;
 }
 .safety-tag {
   font-size: 11px;

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   SEVERITY,
   actionLabel,
+  checkpointLabel,
   errText,
   fmtDate,
   fmtTime,
@@ -257,7 +258,7 @@ onBeforeUnmount(stopLive)
                     {{ f.displayName || '未识别学生' }}
                     <span class="sev" :class="f.severity">{{ SEVERITY[f.severity]?.label || f.severity }}</span>
                   </div>
-                  <div class="feed-cue">{{ f.cueText || f.checkpointId || actionLabel(f.actionType) }}</div>
+                  <div class="feed-cue">{{ f.cueText || checkpointLabel(f.checkpointId) || actionLabel(f.actionType) }}</div>
                 </div>
                 <span class="feed-time">{{ fmtTime(f.occurredAt) }}</span>
               </div>
@@ -277,7 +278,7 @@ onBeforeUnmount(stopLive)
               <div v-for="a in live?.safetyAlerts || []" :key="a.feedbackId" class="alert-row">
                 <span class="ad"></span>
                 <div>
-                  <div class="at">{{ a.message || a.checkpointId }}</div>
+                  <div class="at">{{ a.message || checkpointLabel(a.checkpointId) }}</div>
                   <div class="as">{{ a.displayName || '未识别学生' }} · {{ fmtTime(a.occurredAt) }}</div>
                 </div>
               </div>

@@ -145,7 +145,7 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
     <div class="content kn-grid">
       <!-- 文档表 -->
       <div class="panel" style="overflow: hidden; display: flex; flex-direction: column; min-height: 0">
-        <div class="gtable" style="flex: 1; overflow: hidden; --cols: 1.6fr 1fr 0.9fr 0.8fr 1.2fr 1.3fr">
+        <div class="gtable" style="flex: 1; overflow: hidden; --cols: 1.5fr 0.95fr 0.8fr 0.6fr 1fr 2.05fr">
           <div class="thead">
             <span>docId</span>
             <span>领域 / 来源</span>
@@ -173,7 +173,7 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
               </div>
               <span style="font: 500 13px/1 var(--mono); color: var(--ink-3)">{{ d.chunkCount ?? '—' }}</span>
               <span style="font: 500 12px/1.3 var(--mono); color: var(--gray)">{{ fmtDateTime(d.updatedAt) }}</span>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap">
+              <div style="display: flex; gap: 6px">
                 <button class="op" @click="openDetail(d)">详情</button>
                 <button class="op" @click="reindex(d)">重建索引</button>
                 <button class="op danger" @click="removeDoc(d)">删除</button>

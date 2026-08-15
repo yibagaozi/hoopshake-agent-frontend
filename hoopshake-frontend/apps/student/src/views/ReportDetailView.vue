@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   SEVERITY,
   actionLabel,
+  checkpointLabel,
   errText,
   fmtDate,
   fmtMs,
@@ -31,36 +32,38 @@ const madeRate = computed(() => {
   return Math.round((judged.filter((c) => c.shotMade).length / judged.length) * 100)
 })
 
-/** 检查点表现：按 checkpointId 聚合反馈，正向占比作为表现分 */
+/**
+ * 检查点表现：按 checkpointId 聚合本课反馈做**相对**比较
+ * （报告接口 🚧 未开放，没有绝对评分；这里用扣分权重 MAJOR=1 / MINOR=0.5，
+ *  以本课最差的检查点为基准归一化，无负面反馈者记满分）
+ */
 const checkpointBars = computed(() => {
   const map = new Map()
   for (const f of feedback.value) {
     if (!f.checkpointId) continue
-    const item = map.get(f.checkpointId) || { id: f.checkpointId, total: 0, bad: 0, major: 0, label: f.checkpointId }
+    const item = map.get(f.checkpointId) || { id: f.checkpointId, total: 0, major: 0, minor: 0 }
     item.total++
-    if (f.severity === 'MAJOR') {
-      item.bad++
-      item.major++
-    } else if (f.severity === 'MINOR') {
-      item.bad++
-    }
+    if (f.severity === 'MAJOR') item.major++
+    else if (f.severity === 'MINOR') item.minor++
     map.set(f.checkpointId, item)
   }
-  return [...map.values()]
+  const list = [...map.values()].map((c) => ({ ...c, penalty: c.major + c.minor * 0.5 }))
+  const worst = Math.max(...list.map((c) => c.penalty), 0)
+  return list
     .map((c) => {
-      const score = c.total ? Math.round(((c.total - c.bad) / c.total) * 100) : 0
+      const score = worst > 0 ? Math.round(100 - (c.penalty / worst) * 60) : 100
       let tone = 'ok'
       let verdict = '良好'
-      if (c.major > 0 || score < 50) {
+      if (c.major > 0) {
         tone = 'bad'
         verdict = '需改进'
-      } else if (score < 75) {
+      } else if (c.minor > 0) {
         tone = 'mid'
         verdict = '稳定'
       }
-      return { ...c, score: Math.max(8, score), tone, verdict }
+      return { ...c, label: checkpointLabel(c.id), score, tone, verdict }
     })
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => b.penalty - a.penalty || b.total - a.total)
     .slice(0, 6)
 })
 
@@ -163,7 +166,8 @@ onMounted(async () => {
 
       <!-- 检查点表现 -->
       <div class="card block">
-        <div class="block-title">检查点表现</div>
+        <div class="block-title" style="margin-bottom: 4px">检查点表现</div>
+        <div class="block-note">按本课提示次数相对比较</div>
         <div v-if="!checkpointBars.length" class="empty-hint" style="padding: 18px 0">
           本课暂无检查点反馈
         </div>
@@ -171,7 +175,10 @@ onMounted(async () => {
           <div v-for="c in checkpointBars" :key="c.id">
             <div class="cp-head">
               <span class="cp-name">{{ c.label }}</span>
-              <span class="cp-verdict" :class="c.tone">{{ c.verdict }}</span>
+              <span class="cp-right">
+                <span class="cp-cnt">{{ c.total }} 次提示</span>
+                <span class="cp-verdict" :class="c.tone">{{ c.verdict }}</span>
+              </span>
             </div>
             <div class="cp-track">
               <div class="cp-fill" :class="c.tone" :style="{ width: c.score + '%' }"></div>
@@ -221,7 +228,7 @@ onMounted(async () => {
           <div v-for="f in feedback" :key="f.feedbackId" class="fb-row">
             <span class="fb-tag" :class="f.severity">{{ SEVERITY[f.severity]?.label || f.severity }}</span>
             <div class="fb-mid">
-              <div class="fb-cue">{{ f.cueText || f.checkpointId || '—' }}</div>
+              <div class="fb-cue">{{ f.cueText || checkpointLabel(f.checkpointId) }}</div>
               <div class="fb-sub">
                 {{ actionLabel(f.actionType) }}
                 <template v-if="f.timestampMs !== null && f.timestampMs !== undefined"> · {{ fmtMs(f.timestampMs) }}</template>
@@ -371,9 +378,23 @@ onMounted(async () => {
   justify-content: space-between;
   margin-bottom: 7px;
 }
+.block-note {
+  font-size: 13px;
+  color: var(--gray-2);
+  margin-bottom: 16px;
+}
 .cp-name {
   font-size: 14px;
   color: var(--ink-2);
+}
+.cp-right {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cp-cnt {
+  font-size: 12px;
+  color: var(--gray-2);
 }
 .cp-verdict {
   font-size: 13px;

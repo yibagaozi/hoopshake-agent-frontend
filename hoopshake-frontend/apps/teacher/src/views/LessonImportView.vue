@@ -26,6 +26,13 @@ const previewRows = computed(() => {
     ...(p.willEnroll || []).map((x) => ({ ...x, kind: 'enroll' })),
     ...(p.alreadyEnrolled || []).map((x) => ({ ...x, kind: 'exists' })),
     ...(p.invalid || []).map((x) => ({ ...x, kind: 'invalid' })),
+    // 本地解析阶段已剔除的行也要列出来，避免用户粘贴的内容被静默丢弃
+    ...parseErrors.value.map((e) => ({
+      studentNo: e.text,
+      displayName: '',
+      reason: `第 ${e.line} 行 · ${e.reason}`,
+      kind: 'skipped',
+    })),
   ]
 })
 
@@ -34,7 +41,11 @@ const KIND = {
   enroll: { label: '加入本班', cls: 'info' },
   exists: { label: '已在班', cls: 'muted' },
   invalid: { label: '无效', cls: 'bad' },
+  skipped: { label: '已跳过', cls: 'bad' },
 }
+
+/** 无效 = 服务端判定 + 本地剔除 */
+const invalidCount = computed(() => (preview.value?.invalid?.length || 0) + parseErrors.value.length)
 
 const importableCount = computed(
   () => (preview.value?.willCreate?.length || 0) + (preview.value?.willEnroll?.length || 0)
@@ -217,7 +228,7 @@ onMounted(async () => {
             <div>
               <div class="st-t">核对预检结果</div>
               <div class="st-s" v-if="preview">
-                新建 {{ preview.willCreate?.length || 0 }} · 入班 {{ preview.willEnroll?.length || 0 }} · 无效 {{ preview.invalid?.length || 0 }}
+                新建 {{ preview.willCreate?.length || 0 }} · 入班 {{ preview.willEnroll?.length || 0 }} · 无效 {{ invalidCount }}
               </div>
               <div class="st-s" v-else>预检不会写入任何数据</div>
             </div>
@@ -247,8 +258,8 @@ onMounted(async () => {
           <div class="rc-title">
             <template v-if="step === 1">粘贴名单文本</template>
             <template v-else>
-              识别到 {{ totalRows }} 条记录
-              <span v-if="preview?.invalid?.length" class="pill warn" style="margin-left: 6px">{{ preview.invalid.length }} 条无效</span>
+              可导入 {{ totalRows }} 条记录
+              <span v-if="invalidCount" class="pill warn" style="margin-left: 6px">{{ invalidCount }} 条无效</span>
             </template>
           </div>
           <button v-if="step === 2" class="btn sm" @click="step = 1">重新编辑</button>

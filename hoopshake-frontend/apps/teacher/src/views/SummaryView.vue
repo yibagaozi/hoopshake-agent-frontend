@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   avatarColor,
+  checkpointLabel,
   errText,
   fmtDate,
   fmtPct,
@@ -23,6 +24,9 @@ const data = ref(null)
 const loading = ref(true)
 const error = ref('')
 
+/** 绘图区高度（px）。柱高按像素算，避免 flex 收缩导致比例失真 */
+const PLOT_H = 130
+
 const bars = computed(() => {
   const list = data.value?.checkpointDistribution || []
   if (!list.length) return []
@@ -33,7 +37,7 @@ const bars = computed(() => {
     .slice(0, 6)
     .map((c, i) => ({
       ...c,
-      hpct: Math.max(8, Math.round((c.count / max) * 100)),
+      hpx: Math.max(6, Math.round((c.count / max) * PLOT_H)),
       color: c.safety ? '#E5484D' : i === 0 ? '#FF6A2C' : i === 1 ? '#F0A57A' : '#DED9D2',
       hot: i === 0,
     }))
@@ -128,9 +132,11 @@ onMounted(async () => {
             <div v-if="!bars.length" class="empty-hint">本课没有检查点记录</div>
             <div v-else class="chart">
               <div v-for="b in bars" :key="b.checkpointId" class="col">
-                <span class="cv" :class="{ hot: b.hot }">{{ b.count }}</span>
-                <div class="cb" :style="{ height: b.hpct + '%', background: b.color }"></div>
-                <span class="cl">{{ b.label || b.checkpointId }}</span>
+                <div class="plot" :style="{ height: PLOT_H + 'px' }">
+                  <span class="cv" :class="{ hot: b.hot }">{{ b.count }}</span>
+                  <div class="cb" :style="{ height: b.hpx + 'px', background: b.color }"></div>
+                </div>
+                <span class="cl">{{ b.label || checkpointLabel(b.checkpointId) }}</span>
               </div>
             </div>
           </div>
@@ -143,7 +149,7 @@ onMounted(async () => {
               <div v-for="a in data.safetyAlerts" :key="a.feedbackId" class="arow">
                 <span class="ad"></span>
                 <div style="flex: 1">
-                  <div class="at">{{ a.message || a.checkpointId }}</div>
+                  <div class="at">{{ a.message || checkpointLabel(a.checkpointId) }}</div>
                   <div class="as">{{ a.displayName || '未识别学生' }} · {{ fmtTime(a.occurredAt) }}</div>
                 </div>
               </div>
@@ -176,7 +182,7 @@ onMounted(async () => {
                 <span style="font-size: 15px; font-weight: 600">{{ s.displayName || '未识别' }}</span>
               </div>
               <span style="font: 500 15px/1 var(--mono); color: var(--ink-2)">{{ s.clipCount }}</span>
-              <span style="font-size: 14px; color: var(--ink-2)">{{ s.keyLabel || s.keyCheckpointId || '—' }}</span>
+              <span style="font-size: 14px; color: var(--ink-2)">{{ s.keyLabel || checkpointLabel(s.keyCheckpointId) }}</span>
               <Spark :values="(s.trend || []).map((p) => p.value)" />
               <span v-if="s.recognized" style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ok)">
                 <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--ok)"></span>已识别
@@ -248,7 +254,6 @@ onMounted(async () => {
   display: flex;
   align-items: flex-end;
   gap: 20px;
-  height: 170px;
   padding-left: 4px;
 }
 .col {
@@ -257,19 +262,28 @@ onMounted(async () => {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  height: 100%;
-  justify-content: flex-end;
   min-width: 0;
+}
+/* 固定高度的绘图区：柱子从底部生长，高度用像素给定，比例不受 flex 影响 */
+.plot {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .cv {
   font: 600 13px/1 var(--mono);
   color: var(--gray);
+  flex: none;
 }
 .cv.hot {
   color: var(--brand-deep);
 }
 .cb {
   width: 100%;
+  flex: none;
   border-radius: 8px 8px 0 0;
   transition: height 0.4s ease;
 }

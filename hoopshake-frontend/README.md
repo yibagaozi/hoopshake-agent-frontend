@@ -74,8 +74,8 @@ npm run build:teacher
 
 ## 已知取舍（与后端约定）
 
-- **词表接口 🚧**（`/api/meta/vocabulary` 返回 404/50100）：训练动作与检查点在前端提供常用候选 + 自定义输入，并内置常见 id 的中文映射（`packages/core/src/enums.js` 的 `ACTION_LABELS`），接口开放后可改为动态拉取。
-- **学生报告页的“检查点表现/命中率”** 由 `clips`（shotMade）与 `feedback`（severity 聚合）在前端计算，报告接口（🚧）开放后可直接替换。
+- **词表接口 🚧**（`/api/meta/vocabulary` 返回 404/50100）：训练动作与检查点在前端提供常用候选 + 自定义输入，并内置常见 id 的中文映射（`packages/core/src/enums.js` 的 `ACTION_LABELS` / `CHECKPOINT_LABELS`，未命中时原样显示 id）。接口开放后改为动态拉取即可，调用点统一走 `actionLabel()` / `checkpointLabel()` / `isSafetyCheckpoint()`。
+- **学生报告页的命中率** 由 `clips` 的 `shotMade` 统计得出；**检查点表现**没有绝对评分接口，采用本课反馈的**相对**比较（扣分权重 MAJOR=1 / MINOR=0.5，以本课最差检查点归一化，无负面反馈记满分），卡片上标注了口径并显示真实提示次数。报告接口（🚧）开放后可整体替换这段推导。
 - **激活流程**：设计稿为“学号+姓名”核对；API 无该核验接口，实际以“学号+初始密码登录（PENDING_ACTIVATION）→ 绑定手机+新密码激活”落地。
 - **批量导入**：API 仅接收 `studentNo/displayName`，Excel 请先另存为 CSV（或直接粘贴文本）。
 - **课末汇总入口**：教师侧没有“会话列表”接口，入口通过课程实况的 `activeSession` 或手动粘贴 sessionId 进入。

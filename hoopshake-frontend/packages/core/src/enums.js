@@ -74,3 +74,35 @@ export function actionLabel(id) {
   if (!id) return '—'
   return ACTION_LABELS[id] || ACTION_LABELS[String(id).toLowerCase()] || id
 }
+
+/** 检查点 id → 展示名（同上，词表接口开放后应改为动态拉取） */
+export const CHECKPOINT_LABELS = {
+  elbow_alignment: '肘部对齐',
+  elbow_under_ball: '肘在球下',
+  elbow_flare: '肘部外翻',
+  release_timing: '出手时机',
+  early_release: '出手偏早',
+  follow_through: '跟随动作',
+  wrist_snap: '手腕下压',
+  arc: '投篮弧线',
+  balance: '身体平衡',
+  jump_balance: '起跳平衡',
+  jump_forward: '起跳偏前',
+  knee_valgus: '落地膝内扣',
+  landing_buffer: '落地缓冲',
+  center_of_gravity: '重心控制',
+  footwork: '脚步',
+}
+
+export function checkpointLabel(id) {
+  if (!id) return '—'
+  return CHECKPOINT_LABELS[id] || CHECKPOINT_LABELS[String(id).toLowerCase()] || id
+}
+
+/** 安全类检查点（触发时按安全提醒处理） */
+const SAFETY_CHECKPOINTS = new Set(['knee_valgus', 'landing_buffer'])
+
+export function isSafetyCheckpoint(id) {
+  if (!id) return false
+  return SAFETY_CHECKPOINTS.has(String(id).toLowerCase()) || /knee|valgus|land|safety|ankle/i.test(id)
+}
