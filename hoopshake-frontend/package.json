@@ -1,0 +1,20 @@
+{
+  "name": "hoopshake-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HOOPSHAKE 智能篮球训练系统前端（学生端 + 教师端）",
+  "workspaces": [
+    "packages/core",
+    "apps/student",
+    "apps/teacher"
+  ],
+  "scripts": {
+    "dev:student": "npm run dev --workspace apps/student",
+    "dev:teacher": "npm run dev --workspace apps/teacher",
+    "build": "npm run build --workspace apps/student && npm run build --workspace apps/teacher",
+    "build:student": "npm run build --workspace apps/student",
+    "build:teacher": "npm run build --workspace apps/teacher",
+    "preview:student": "npm run preview --workspace apps/student",
+    "preview:teacher": "npm run preview --workspace apps/teacher"
+  }
+}
