@@ -1,0 +1,42 @@
+# HOOPSHAKE 前端 · 单容器部署（nginx 同时托管学生端/教师端并反代后端 API）
+#
+#   docker compose up -d --build
+#   → 学生端 http://<服务器>/student/    教师端 http://<服务器>/teacher/
+#
+# 后端已在同一台机器的 docker 里跑在 8080，二选一对接：
+#   A. 共享网络（推荐）：把后端容器接入本文件创建的 hoopshake-net
+#        docker network connect hoopshake-net <后端容器名>
+#      并保证下面的 BACKEND_ORIGIN 与后端容器名一致
+#   B. 走宿主机：后端已把 8080 发布到宿主机时，改用
+#        BACKEND_ORIGIN: http://host.docker.internal:8080
+#      并取消 extra_hosts 的注释
+
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        STUDENT_BASE: /student/
+        TEACHER_BASE: /teacher/
+        API_BASE_URL: ""          # 同源，交给 nginx 反代
+    image: hoopshake-frontend:1.0.0
+    container_name: hoopshake-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      BACKEND_ORIGIN: http://hoopshake-backend:8080
+      BACKEND_RESOLVER: 127.0.0.11        # docker 用户自定义网络的内建 DNS
+    # extra_hosts:                        # 方案 B 时启用
+    #   - "host.docker.internal:host-gateway"
+    networks:
+      - hoopshake
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  hoopshake:
+    name: hoopshake-net

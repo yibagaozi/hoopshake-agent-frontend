@@ -38,6 +38,21 @@ npm run build:teacher
 
 > 两个应用都是 history 路由，部署时需将 404 回退到 `index.html`；若 API 与前端不同源，设置 `VITE_API_BASE_URL` 并在后端开启 CORS。
 
+## 部署（Docker）
+
+一个 nginx 容器同时托管两个应用并反代后端，前后端同源、无需 CORS：
+
+```bash
+docker compose up -d --build
+docker network connect hoopshake-net <后端容器名>   # 后端跑在同机 docker 的 8080
+```
+
+- 学生端 `http://<服务器>/student/`　教师端 `http://<服务器>/teacher/`
+- 完整说明见 **[deploy/README.md](deploy/README.md)**（后端对接、SSE 注意事项、HTTPS、升级回滚、排查表）
+
+子路径由构建参数决定：`VITE_BASE_PATH` 同时作用于 Vite 的 `base` 与 vue-router 的 history base，
+两处联动，改一个参数即可整体挪位置（缺省为根路径，本地 dev 不受影响）。
+
 ## 功能覆盖（对照 API v1.7）
 
 ### 学生端 `apps/student`（STUDENT）
