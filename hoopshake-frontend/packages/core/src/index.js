@@ -12,6 +12,7 @@ export {
   apiBaseUrl,
 } from './http.js'
 export { sseRequest } from './sse.js'
+export { renderMarkdown } from './markdown.js'
 export { ERROR_MESSAGES, errText, isNotOpen } from './errors.js'
 export * from './enums.js'
 export * from './format.js'

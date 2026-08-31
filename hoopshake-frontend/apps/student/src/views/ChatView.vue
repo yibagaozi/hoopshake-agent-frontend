@@ -1,7 +1,7 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { errText, fmtFriendly, isCode, studentChatApi } from '@hoopshake/core'
+import { errText, fmtFriendly, isCode, renderMarkdown, studentChatApi } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
 import { toast } from '../toast.js'
 import TabBar from '../components/TabBar.vue'
@@ -252,7 +252,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="bubble" :class="m.role === 'USER' ? 'user' : 'ai'">
-        <span style="white-space: pre-wrap">{{ m.content }}</span><span v-if="m.streaming" class="caret"></span>
+        <!-- 用户输入按纯文本呈现，避免把自己打的符号解析成格式 -->
+        <span v-if="m.role === 'USER'" style="white-space: pre-wrap">{{ m.content }}</span>
+        <template v-else>
+          <div class="md" v-html="renderMarkdown(m.content)"></div><span v-if="m.streaming" class="caret"></span>
+        </template>
         <div v-if="m.interrupted" class="interrupted">已停止生成</div>
       </div>
     </template>
@@ -404,6 +408,72 @@ onBeforeUnmount(() => {
   background: var(--brand);
   color: #fff;
   border-radius: 20px 20px 6px 20px;
+}
+/* 气泡内的 Markdown 排版：紧凑、跟随气泡字号 */
+.md {
+  font-size: 15px;
+  line-height: 1.55;
+}
+.md :deep(> *:first-child) {
+  margin-top: 0;
+}
+.md :deep(> *:last-child) {
+  margin-bottom: 0;
+}
+.md :deep(p) {
+  margin: 0 0 8px;
+}
+.md :deep(h3),
+.md :deep(h4),
+.md :deep(h5) {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+}
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 6px 0 8px;
+  padding-left: 20px;
+}
+.md :deep(li) {
+  margin: 3px 0;
+}
+.md :deep(li)::marker {
+  color: var(--gray-2);
+}
+.md :deep(strong) {
+  font-weight: 700;
+  color: var(--brand-deep);
+}
+.md :deep(code) {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--fill-2);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md :deep(pre) {
+  background: var(--fill);
+  border-radius: 12px;
+  padding: 11px 13px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.md :deep(pre code) {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.md :deep(blockquote) {
+  margin: 8px 0;
+  padding: 2px 0 2px 11px;
+  border-left: 3px solid var(--line-2);
+  color: var(--ink-3);
+}
+.md :deep(a) {
+  color: var(--brand-deep);
+  text-decoration: underline;
 }
 .caret {
   display: inline-block;

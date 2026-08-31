@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   avatarColor,
   checkpointLabel,
+  renderMarkdown,
   errText,
   fmtDate,
   fmtPct,
@@ -15,7 +16,7 @@ import {
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
 import Spark from '../components/Spark.vue'
-import { renderMarkdown } from '../utils/markdown.js'
+
 
 const props = defineProps({ sessionId: { type: String, required: true } })
 const router = useRouter()
