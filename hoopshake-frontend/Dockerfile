@@ -32,8 +32,11 @@ COPY deploy/nginx.conf.template /etc/nginx/templates/hoopshake.conf.template
 
 # 官方镜像入口脚本会对 /etc/nginx/templates/*.template 跑 envsubst；
 # 用 FILTER 限定只替换 BACKEND_* ，避免 $uri 等 nginx 变量被替换成空
+# BACKEND_ORIGIN 默认用 compose 的**服务名** backend:8080 —— 生产 compose 里
+# frontend 服务不写 environment 也能直接跑通；服务名与容器名不同时在
+# compose 里覆盖该变量即可
 ENV NGINX_ENVSUBST_FILTER=^BACKEND_ \
-    BACKEND_ORIGIN=http://hoopshake-backend:8080 \
+    BACKEND_ORIGIN=http://backend:8080 \
     BACKEND_RESOLVER=127.0.0.11
 
 EXPOSE 80
