@@ -1,0 +1,316 @@
+/* 学生端全局样式 —— 依据 Hoopshake 设计稿（移动端 390×844，iOS 风格） */
+
+:root {
+  --brand: #ff6a2c;
+  --brand-deep: #e8551a;
+  --brand-soft: #fff1e9;
+  --brand-glow: rgba(255, 106, 44, 0.28);
+  --ink: #1c1c1e;
+  --ink-2: #3a3a3c;
+  --ink-3: #6e6e73;
+  --gray: #8a8a8e;
+  --gray-2: #a1a1a6;
+  --gray-3: #b8b8b4;
+  --gray-4: #c4c4c0;
+  --page: #f4f4f1;
+  --card: #ffffff;
+  --fill: #f2f2ef;
+  --fill-2: #f0f0ec;
+  --line: #eaeae6;
+  --line-2: #e4e4e0;
+  --divider: #f0f0ec;
+  --dark-card: #2b2f36;
+  --dark-muted: #9ba1ac;
+  --dark-track: #3c424c;
+  --ok: #2fb170;
+  --ok-bg: #e7f6ef;
+  --ok-deep: #2e7c58;
+  --danger: #e5484d;
+  --danger-bg: #fbebec;
+  --safety: #c0562c;
+  --safety-bg: #fbe7dc;
+  --safety-line: #f1cdbb;
+  --warn: #c98a16;
+  --warn-bg: #fbf0d8;
+  --accent-light: #ff8a4c;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  background: #e9e9e4;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--brand-deep);
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+/* 手机视口容器：小屏铺满，大屏居中成手机宽度 */
+.phone-viewport {
+  height: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  background: var(--page);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+@media (min-width: 500px) {
+  .phone-viewport {
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 20px 60px rgba(0, 0, 0, 0.18);
+  }
+}
+
+/* 通用滚动区 */
+.scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.scroll-body::-webkit-scrollbar {
+  display: none;
+}
+
+/* 卡片 */
+.card {
+  background: var(--card);
+  border-radius: 26px;
+}
+
+/* 圆形返回按钮 */
+.btn-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 23px;
+  color: var(--ink-2);
+  line-height: 1;
+  padding-bottom: 2px;
+  flex: none;
+}
+
+/* 药丸输入框 */
+.input-pill {
+  width: 100%;
+  height: 54px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: #fff;
+  padding: 0 18px;
+  font-size: 16px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input-pill:focus {
+  border-color: var(--brand);
+}
+.input-pill::placeholder {
+  color: var(--gray-2);
+}
+.input-label {
+  font-size: 13px;
+  color: var(--gray);
+  font-weight: 600;
+  margin: 0 0 9px 18px;
+}
+
+/* 主按钮 */
+.btn-primary {
+  width: 100%;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px var(--brand-glow);
+  transition: transform 0.1s, opacity 0.15s;
+}
+.btn-primary:active {
+  transform: scale(0.98);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* 分段选择（左手/右手） */
+.segmented {
+  display: flex;
+  background: #e7e7e3;
+  border-radius: 999px;
+  padding: 4px;
+  gap: 4px;
+}
+.segmented button {
+  flex: 1;
+  border-radius: 999px;
+  padding: 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--gray);
+}
+.segmented button.on {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.07);
+}
+
+/* 信息行列表卡 */
+.info-card {
+  background: #fff;
+  border-radius: 26px;
+  padding: 4px 18px;
+}
+.info-row {
+  display: flex;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.info-row:last-child {
+  border-bottom: none;
+}
+.info-row .k {
+  font-size: 15px;
+  color: var(--gray);
+  width: 96px;
+  flex: none;
+}
+.info-row .v {
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 骨架屏 */
+.skeleton {
+  background: linear-gradient(90deg, #ecece8 25%, #f5f5f1 50%, #ecece8 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 10px;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes recpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* 空状态 */
+.empty-hint {
+  text-align: center;
+  color: var(--gray-2);
+  font-size: 14px;
+  padding: 38px 20px;
+}
+
+/* toast */
+.hs-toast-wrap {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + 18px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 999;
+  pointer-events: none;
+}
+.hs-toast {
+  max-width: 86%;
+  background: rgba(28, 28, 30, 0.92);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 11px 18px;
+  border-radius: 99px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  animation: toast-in 0.22s ease;
+}
+.hs-toast.err {
+  background: rgba(197, 48, 48, 0.94);
+}
+.hs-toast.ok {
+  background: rgba(36, 128, 84, 0.94);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

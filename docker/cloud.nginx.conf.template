@@ -1,0 +1,100 @@
+# ─────────────────────────────────────────────────────────────────────────
+# HOOPSHAKE 前端站点配置
+#
+# 本文件由 nginx 官方镜像启动时用 envsubst 渲染，且只替换 BACKEND_ 开头的变量
+# （见 Dockerfile 的 NGINX_ENVSUBST_FILTER=^BACKEND_），因此 $uri / $host 等
+# nginx 自身变量不会被吃掉。
+#
+#   BACKEND_ORIGIN    后端地址，如 http://hoopshake-backend:8080
+#   BACKEND_RESOLVER  DNS 服务器；docker 用户自定义网络的内建 DNS 为 127.0.0.11
+# ─────────────────────────────────────────────────────────────────────────
+
+# 预留 WebSocket 升级（SSE 不需要 upgrade，此处保持通用）
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    absolute_redirect off;          # 反代/TLS 终结在前时，重定向保持相对路径
+
+    # 知识库导入的 Markdown 可能较大
+    client_max_body_size 20m;
+
+    # 仅压缩静态文本。注意 text/event-stream 绝不能压缩，否则 SSE 会被缓冲
+    gzip              on;
+    gzip_vary         on;
+    gzip_min_length   1024;
+    gzip_proxied      any;
+    gzip_types        text/plain text/css application/javascript application/json image/svg+xml;
+
+    # ── 健康检查 ──────────────────────────────────────────────────────
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ── 裸域名跳学生端 ────────────────────────────────────────────────
+    location = /          { return 302 /student/; }
+    location = /student   { return 301 /student/; }
+    location = /teacher   { return 301 /teacher/; }
+
+    # ── 后端 API（含 SSE 长连接）──────────────────────────────────────
+    location /api/ {
+        # 用变量 + resolver 让 nginx 每次按 DNS 解析后端，
+        # 避免后端容器重建换 IP 后 nginx 仍打向旧地址
+        resolver ${BACKEND_RESOLVER} valid=10s ipv6=off;
+        set $backend_origin ${BACKEND_ORIGIN};
+        proxy_pass $backend_origin$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+
+        # SSE 关键三件套：关缓冲、关缓存、拉长读超时
+        # （心跳 15s/次，这里留 1 小时余量；缺少 proxy_buffering off
+        #   会导致 AI 回复与课堂实况「憋住不出字」）
+        proxy_buffering           off;
+        proxy_cache               off;
+        proxy_read_timeout        3600s;
+        proxy_send_timeout        3600s;
+        chunked_transfer_encoding on;
+
+        # 后端返回该头时 nginx 也会关闭缓冲，双保险
+        proxy_pass_header X-Accel-Buffering;
+    }
+
+    # ── 构建产物（文件名带 hash）：长缓存 ─────────────────────────────
+    location ~* ^/(student|teacher)/assets/ {
+        add_header Cache-Control          "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff             always;
+        try_files $uri =404;
+    }
+
+    # ── 学生端 SPA ────────────────────────────────────────────────────
+    location /student/ {
+        try_files $uri $uri/ /student/index.html;
+        add_header Cache-Control          "no-cache, must-revalidate"   always;
+        add_header X-Content-Type-Options nosniff                       always;
+        add_header X-Frame-Options        SAMEORIGIN                    always;
+        add_header Referrer-Policy        strict-origin-when-cross-origin always;
+    }
+
+    # ── 教师端 SPA ────────────────────────────────────────────────────
+    location /teacher/ {
+        try_files $uri $uri/ /teacher/index.html;
+        add_header Cache-Control          "no-cache, must-revalidate"   always;
+        add_header X-Content-Type-Options nosniff                       always;
+        add_header X-Frame-Options        SAMEORIGIN                    always;
+        add_header Referrer-Policy        strict-origin-when-cross-origin always;
+    }
+}

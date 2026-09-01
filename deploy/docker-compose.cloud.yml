@@ -1,0 +1,15 @@
+# 云端服务器：与后端、redis 同属一个 compose 网络（放进 /opt/hoopshake/docker-compose.yml 的 services 下）
+# 前端 nginx 用服务名 backend:8080 反代 /api，浏览器同源 → 免 CORS
+
+services:
+  frontend:
+    image: crpi-fgo4g7v7lir6fd0o.cn-beijing.personal.cr.aliyuncs.com/hoopshake/hoopshake-agent-frontend-cloud:latest
+    container_name: hoopshake-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    # BACKEND_ORIGIN 默认就是 http://backend:8080，服务名一致时无需覆盖
+    # environment:
+    #   BACKEND_ORIGIN: http://backend:8080

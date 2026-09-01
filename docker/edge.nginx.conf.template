@@ -1,0 +1,123 @@
+# ─────────────────────────────────────────────────────────────────────────
+# HOOPSHAKE 场边前端站点配置
+#
+# 由 nginx 官方镜像启动时 envsubst 渲染，只替换 EDGE_/CLOUD_/NGINX_PORT 开头的变量
+# （NGINX_ENVSUBST_FILTER），因此 $uri / $host / $proxy_host 等 nginx 变量不受影响。
+#
+#   EDGE_ORIGIN     场边本机 edge 服务，如 http://host.docker.internal:8080
+#   CLOUD_ORIGIN    云端 boot 服务，如 https://api.hoopshake.example
+#   EDGE_RESOLVER   DNS；docker 自定义网络内建 DNS 为 127.0.0.11，
+#                   它同时也能解析外网域名，所以云端域名走它没问题
+#
+# 设计要点：浏览器只跟本服务同源通信。
+#   · edge 不必开 CORS
+#   · 云端不必为场边开 CORS，也没有 HTTPS 页面请求 HTTP 接口的混合内容问题
+#   · 操作台窗口与大屏窗口同源，BroadcastChannel 才能互通
+# ─────────────────────────────────────────────────────────────────────────
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen       ${NGINX_PORT};
+    server_name  _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    absolute_redirect off;
+    client_max_body_size 20m;
+
+    # 场边排障时希望日志立刻可见
+    access_log /dev/stdout;
+    error_log  /dev/stderr warn;
+
+    gzip              on;
+    gzip_vary         on;
+    gzip_min_length   1024;
+    gzip_proxied      any;
+    # 不含 text/event-stream：压缩会导致流式响应被缓冲
+    gzip_types        text/plain text/css application/javascript application/json image/svg+xml;
+
+    # ── 健康检查 ──────────────────────────────────────────────────────
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ── 场边本机业务接口 ──────────────────────────────────────────────
+    location /local/ {
+        resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+        set $edge_origin ${EDGE_ORIGIN};
+        proxy_pass $edge_origin$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $proxy_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 采集重启、名单同步这类操作偏慢，给足时间
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_buffering    off;
+    }
+
+    # ── 场边 WebSocket 实时通道（骨架帧 / 提示流）──────────────────────
+    location /ws/ {
+        resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+        set $ws_origin ${EDGE_ORIGIN};
+        proxy_pass $ws_origin$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host       $proxy_host;
+
+        # 长连接不能被超时掐断
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        proxy_buffering    off;
+    }
+
+    # ── 云端接口（教师登录 / 列课）────────────────────────────────────
+    location /api/ {
+        resolver ${EDGE_RESOLVER} valid=10s ipv6=off;
+        set $cloud_origin ${CLOUD_ORIGIN};
+        proxy_pass $cloud_origin$request_uri;
+
+        proxy_http_version 1.1;
+        # $proxy_host 取 proxy_pass 里的主机名，云端是 https 域名时 vhost 才能匹配上
+        proxy_set_header Host              $proxy_host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 云端为 https 时必须开 SNI，否则 TLS 握手失败
+        proxy_ssl_server_name on;
+
+        # 云端若有 SSE（AI 对话）走这条路时同样不能缓冲
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # ── 构建产物（文件名带 hash）：长缓存 ─────────────────────────────
+    location /assets/ {
+        add_header Cache-Control          "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff                               always;
+        try_files $uri =404;
+    }
+
+    # ── SPA 回退：/console/live、/display 刷新都交给 index.html ────────
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control          "no-cache, must-revalidate"     always;
+        add_header X-Content-Type-Options nosniff                         always;
+        add_header Referrer-Policy        strict-origin-when-cross-origin always;
+    }
+}
