@@ -1,0 +1,23 @@
+{
+  "name": "hoopshake-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HOOPSHAKE 前端 monorepo：云端（学生/教师）+ 场边（操作台/大屏）",
+  "workspaces": [
+    "packages/core",
+    "apps/student",
+    "apps/teacher",
+    "apps/courtside"
+  ],
+  "scripts": {
+    "dev:student": "npm run dev --workspace apps/student",
+    "dev:teacher": "npm run dev --workspace apps/teacher",
+    "dev:courtside": "npm run dev --workspace apps/courtside",
+    "mock:edge": "npm run mock --workspace apps/courtside",
+    "build": "npm run build:cloud && npm run build:edge",
+    "build:cloud": "npm run build --workspace apps/student && npm run build --workspace apps/teacher",
+    "build:edge": "npm run build --workspace apps/courtside",
+    "build:student": "npm run build --workspace apps/student",
+    "build:teacher": "npm run build --workspace apps/teacher"
+  }
+}

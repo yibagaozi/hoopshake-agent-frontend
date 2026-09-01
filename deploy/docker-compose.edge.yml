@@ -1,0 +1,28 @@
+# 场边主机：前端容器与 edge 服务在同一台机器上
+#
+#   docker compose -f docker-compose.edge.yml up -d
+#   → 操作台 http://<场边主机>:8081/console/live    大屏 http://<场边主机>:8081/display
+#
+# 浏览器只跟本容器同源通信，三类请求由容器内 nginx 分发：
+#   /local /ws → 本机 edge 服务      /api → 云端 boot 服务
+
+services:
+  courtside:
+    image: crpi-fgo4g7v7lir6fd0o.cn-beijing.personal.cr.aliyuncs.com/hoopshake/hoopshake-agent-frontend-edge:latest
+    container_name: hoopshake-courtside
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8081}:80"
+    environment:
+      # 场边本机 edge 服务（与容器同宿主机）
+      EDGE_ORIGIN: ${EDGE_ORIGIN:-http://host.docker.internal:8080}
+      # 云端 boot 服务，登录与列课走这里
+      CLOUD_ORIGIN: ${CLOUD_ORIGIN:-https://api.hoopshake.example}
+    # Linux 上 host.docker.internal 默认不存在，这行把它指到宿主机
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -11,6 +11,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 云端：学生端 /student/ + 教师端 /teacher/
+          - name: cloud
+            image: hoopshake/hoopshake-agent-frontend-cloud
+            dockerfile: docker/cloud.Dockerfile
+          # 场边：操作台 /console/* + 大屏 /display
+          - name: edge
+            image: hoopshake/hoopshake-agent-frontend-edge
+            dockerfile: docker/edge.Dockerfile
+
     steps:
       - name: 'Checkout GitHub Action'
         uses: actions/checkout@v4
@@ -25,12 +38,11 @@ jobs:
       - name: 'Build & Push'
         env:
           REGISTRY: crpi-fgo4g7v7lir6fd0o.cn-beijing.personal.cr.aliyuncs.com
-          IMAGE_NAME: hoopshake/frontend
-          # Dockerfile 所在目录。若日后把项目平铺到仓库根目录，这里改成 .
-          CONTEXT: ./hoopshake-frontend
+          IMAGE_NAME: ${{ matrix.image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
         run: |
           branch_name=${GITHUB_REF##*/}
-          echo "当前分支: $branch_name"
+          echo "当前分支: $branch_name  构建目标: ${{ matrix.name }}"
 
           if [ "$branch_name" = "master" ]; then
             tag="latest"
@@ -44,7 +56,8 @@ jobs:
           sha_tag="${tag}-${GITHUB_SHA::7}"
           echo "使用 tag: $tag 与 $sha_tag"
 
-          docker build ${CONTEXT} \
+          # 构建上下文为仓库根，两个镜像共用同一份 workspace 与 lockfile
+          docker build . --file ${DOCKERFILE} \
             --tag ${REGISTRY}/${IMAGE_NAME}:$tag \
             --tag ${REGISTRY}/${IMAGE_NAME}:$sha_tag
           docker push ${REGISTRY}/${IMAGE_NAME}:$tag
