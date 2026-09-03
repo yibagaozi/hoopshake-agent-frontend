@@ -96,6 +96,28 @@ curl -i http://127.0.0.1:8082/healthz                                    # → 2
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8082/student/  # → 200
 ```
 
+### 第 3 步（快速路线）：复用已废弃子域名的证书
+
+没有泛域名证书、又想先跑通验证时，可以先借用一个**已停用但证书还在**的子域名 server 块，
+只改 `proxy_pass` 的端口，不用新申请证书、不用新增 server 块。
+
+例如某个 server 块原来代理到本机某端口（如 Vite 的 5173）、且该服务已经停用：
+
+```diff
+     location / {
+                 proxy_http_version      1.1;
+-                proxy_pass              http://127.0.0.1:5173/;
++                proxy_pass              http://127.0.0.1:8082;
+```
+
+**必须去掉结尾的 `/`**——带斜杠 nginx 会剥掉 location 匹配到的前缀再转发，
+不带斜杠才会把 URI 原样透传，前端容器内部靠完整路径（`/student/` `/teacher/` `/api/`）
+分发，少了会全部 404。
+
+其余 `proxy_buffering off` / `proxy_cache off` / timeout 这些通常已经具备，不用新增
+SSE 相关配置。跑通之后如果打算长期用这个域名再调整措辞；申请到专属域名后把改动原样
+搬过去，把旧块的 proxy_pass 改回原值或删除即可切换，互不影响。
+
 ### 第 3 步：宿主机 nginx 反代
 
 把 `deploy/host-nginx.conf.example` 的 location 部分加进你的 server 块
