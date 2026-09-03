@@ -17,3 +17,9 @@ services:
     # BACKEND_ORIGIN 默认就是 http://backend:8080，服务名一致时无需覆盖
     # environment:
     #   BACKEND_ORIGIN: http://backend:8080
+    #
+    #   # 登录报 403 "Invalid CORS request" 时的应急开关：清掉 Origin 头。
+    #   # 浏览器对同源 POST 也会带 Origin，后端 CORS 白名单里没有本站域名就会拒掉。
+    #   # 正解是后端把域名加进白名单，这里只是先把人放进去。详见 deploy/README.md 第二节第 5 步。
+    #   # 注意引号：值必须渲染成 nginx 的空字符串 ""，留空会让 nginx 配置语法错误。
+    #   BACKEND_STRIP_ORIGIN: '""'

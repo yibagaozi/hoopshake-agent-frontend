@@ -41,7 +41,8 @@ COPY docker/cloud.nginx.conf.template /etc/nginx/templates/hoopshake.conf.templa
 # compose 里覆盖该变量即可
 ENV NGINX_ENVSUBST_FILTER=^BACKEND_ \
     BACKEND_ORIGIN=http://backend:8080 \
-    BACKEND_RESOLVER=127.0.0.11
+    BACKEND_RESOLVER=127.0.0.11 \
+    BACKEND_STRIP_ORIGIN=\$http_origin
 
 EXPOSE 80
 

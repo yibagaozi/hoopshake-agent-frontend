@@ -60,6 +60,14 @@ server {
         proxy_set_header Upgrade           $http_upgrade;
         proxy_set_header Connection        $connection_upgrade;
 
+        # 浏览器对同源的 POST/PUT/DELETE 也会带 Origin 头。若后端启用了 CORS 白名单
+        # 且没把本站域名加进去，就会把这些**同源**请求当跨源拒掉（403 Invalid CORS request）。
+        # 正解是后端把域名加进白名单；下面这行是应急开关：清掉 Origin，
+        # 让后端按普通同源请求处理。
+        #   默认 $http_origin —— 原样透传，行为不变
+        #   应急时在 compose 里设 BACKEND_STRIP_ORIGIN='""' —— 清掉该头
+        proxy_set_header Origin            ${BACKEND_STRIP_ORIGIN};
+
         # SSE 关键三件套：关缓冲、关缓存、拉长读超时
         # （心跳 15s/次，这里留 1 小时余量；缺少 proxy_buffering off
         #   会导致 AI 回复与课堂实况「憋住不出字」）

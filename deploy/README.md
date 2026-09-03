@@ -155,6 +155,54 @@ curl -s -o /dev/null -w '%{http_code}\n' https://你的域名/student/
 浏览器打开 `https://你的域名/student/` 与 `/teacher/`，登录后进 AI 对话页发一条消息，
 **看回复是不是逐字出现**——如果卡很久然后一次性全出来，就是某一层缓冲了 SSE，见第四节。
 
+### 第 5 步（可能遇到）：登录返回 403 `Invalid CORS request`
+
+**现象很有迷惑性**：三层 curl 全通（后端 8080、容器 8082、公网 443 都是 200），
+浏览器一登录就 403，F12 里还看不到 OPTIONS 预检。
+
+**原因**：浏览器对**同源**的 `POST/PUT/DELETE` 也会带上 `Origin: https://你的域名`
+（同源简单请求不预检，所以 F12 没有 OPTIONS）。后端若开了 CORS 白名单而白名单里
+没有这个域名，Spring 的 `DefaultCorsProcessor` 会把这条**同源**请求当跨源拒掉，
+直接 403 `Invalid CORS request`。curl 不带 `Origin`，所以怎么测都是 200。
+
+复现（在服务器上跑，把域名换成自己的）：
+
+```bash
+# 不带 Origin —— 200
+curl -i -X POST https://你的域名/api/auth/login \
+     -H 'Content-Type: application/json' -d '{}'
+
+# 带 Origin —— 403 Invalid CORS request，就是这个问题
+curl -i -X POST https://你的域名/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -H 'Origin: https://你的域名' -d '{}'
+```
+
+**修法一（推荐，后端改）**：把 `https://你的域名` 加进后端的 CORS 允许来源白名单。
+这套部署本来就是同源的，让后端认识自己的域名是正解，改完前端不用动。
+
+**修法二（应急，前端 nginx 改）**：容器 nginx 把 `Origin` 头清掉，后端就按普通同源请求处理。
+在 compose 的 frontend 服务里加一行环境变量，重启容器即可：
+
+```yaml
+services:
+  frontend:
+    environment:
+      # 注意引号：值必须是 nginx 认识的空字符串 ""，不能留空
+      BACKEND_STRIP_ORIGIN: '""'
+```
+
+```bash
+docker compose up -d frontend
+docker exec hoopshake-frontend grep 'Origin' /etc/nginx/conf.d/hoopshake.conf
+#   期望看到：proxy_set_header Origin            "";
+```
+
+不设这个变量时默认是 `$http_origin`（原样透传），行为与以前完全一致。
+
+> 这是权宜之计：它只是把「浏览器如实上报的来源」抹掉了。真正跨域部署
+> （前后端不同域名）时必须用修法一，否则跨域请求同样会被拒。
+
 ---
 
 ## 三、场边部署
@@ -263,6 +311,7 @@ docker compose up -d frontend
 | `/api` 502 | 后端服务名与 `BACKEND_ORIGIN` 不一致，或两个容器不在同一网络；`docker compose ps` 与 `docker network inspect` 确认 |
 | 后端容器重建后一直 502 | 本配置用 `resolver` + 变量已规避 DNS 缓存；若改回静态 `proxy_pass` 会有此问题 |
 | AI 回复不逐字出现，等很久一次性出全 | 某一层代理缓冲或压缩了 SSE，见第四节 |
+| 登录 403、响应体 `Invalid CORS request` | 后端 CORS 白名单没有本站域名；浏览器同源 POST 也带 `Origin`。见第二节第 5 步 |
 | 登录后立刻被踢回登录页 | 后端返回 401/40100；检查中间层是否剥掉了 `Authorization` 头 |
 | 场边 `/local` 502 | `EDGE_ORIGIN` 不对，或 Linux 上缺 `extra_hosts: host.docker.internal:host-gateway` |
 | 场边 WS 连不上 / 频繁重连 | 中间层没放行 Upgrade，或读超时太短 |
