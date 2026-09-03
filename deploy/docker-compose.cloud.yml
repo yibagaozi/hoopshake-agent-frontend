@@ -1,5 +1,8 @@
-# 云端服务器：与后端、redis 同属一个 compose 网络（放进 /opt/hoopshake/docker-compose.yml 的 services 下）
-# 前端 nginx 用服务名 backend:8080 反代 /api，浏览器同源 → 免 CORS
+# 云端服务器：把这段并进 /opt/hoopshake/docker-compose.yml 的 services 下
+# （backend、redis、frontend 同属一个 compose 网络，前端用服务名 backend:8080 反代 /api）
+#
+# 宿主机已有 nginx 占用 80/443，所以容器只绑本机高位端口，
+# 由宿主机 nginx 反代过来 —— 配置见 deploy/host-nginx.conf.example
 
 services:
   frontend:
@@ -9,7 +12,8 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      # 只对本机开放，外部一律经宿主机 nginx 进来
+      - "127.0.0.1:${FRONTEND_PORT:-8082}:80"
     # BACKEND_ORIGIN 默认就是 http://backend:8080，服务名一致时无需覆盖
     # environment:
     #   BACKEND_ORIGIN: http://backend:8080

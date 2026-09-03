@@ -54,7 +54,16 @@ crpi-fgo4g7v7lir6fd0o.cn-beijing.personal.cr.aliyuncs.com/hoopshake/hoopshake-ag
 
 ## 二、云端部署
 
-在服务器 `/opt/hoopshake/docker-compose.yml` 的 services 下加入（backend、redis、frontend 同一网络）：
+### 前提
+
+1. CI 已跑过，镜像在 ACR 里（推 `master` 或 `develop` 触发）
+2. 宿主机若已有 nginx 占用 80/443（用 `ss -lntp | grep -E ':80 |:443 '` 确认），
+   前端容器就**不能再绑 80**，改由宿主机 nginx 反代
+
+### 第 1 步：加入 compose
+
+在 `/opt/hoopshake/docker-compose.yml` 的 services 下加入（内容见
+`deploy/docker-compose.cloud.yml`）：
 
 ```yaml
   frontend:
@@ -64,24 +73,65 @@ crpi-fgo4g7v7lir6fd0o.cn-beijing.personal.cr.aliyuncs.com/hoopshake/hoopshake-ag
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "127.0.0.1:8082:80"     # 只对本机开放，外部经宿主机 nginx 进来
 ```
 
 镜像默认 `BACKEND_ORIGIN=http://backend:8080`（compose **服务名**），
-所以 frontend 服务不写 `environment` 也能直接跑通。后端服务改名时才需要覆盖：
+所以不写 `environment` 也能跑通；后端服务改名时才需要覆盖。
 
-```yaml
-    environment:
-      BACKEND_ORIGIN: http://<新的服务名>:8080
-```
+### 第 2 步：拉起前端（不影响后端）
 
 ```bash
 cd /opt/hoopshake
-docker compose pull frontend && docker compose up -d frontend
-
-curl -i http://localhost/healthz                                    # → 200 ok
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost/student/  # → 200
+docker compose pull frontend
+docker compose up -d frontend      # ← 带服务名，backend / redis 不受影响
 ```
+
+> 不要用不带服务名的 `docker compose up -d`，那会按整个文件对齐状态，可能顺手重建后端。
+
+自检：
+
+```bash
+curl -i http://127.0.0.1:8082/healthz                                    # → 200 ok
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8082/student/  # → 200
+```
+
+### 第 3 步：宿主机 nginx 反代
+
+把 `deploy/host-nginx.conf.example` 的 location 部分加进你的 server 块
+（或整个 server 块拿去用），核心是这两条：
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8082;
+    proxy_buffering    off;        # ← SSE 命门，少了 AI 回复会「憋住不出字」
+    proxy_read_timeout 3600s;      # ← 心跳 15s/次，默认 60s 会掐断
+    gzip off;                      # ← 绝不能压缩 text/event-stream
+    # ...（完整头部见示例文件）
+}
+
+location / {
+    proxy_pass http://127.0.0.1:8082;
+    # ...
+}
+```
+
+容器内部已经做完全部路由（SPA 回退、静态缓存、`/api` → `backend:8080`），
+**宿主机这层不要再拆路径**，整体转进去即可，否则两层规则容易打架。
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 第 4 步：验证
+
+```bash
+curl -i https://你的域名/healthz
+curl -s -o /dev/null -w '%{http_code}\n' https://你的域名/student/
+```
+
+浏览器打开 `https://你的域名/student/` 与 `/teacher/`，登录后进 AI 对话页发一条消息，
+**看回复是不是逐字出现**——如果卡很久然后一次性全出来，就是某一层缓冲了 SSE，见第四节。
 
 ---
 

@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────
+# 宿主机 nginx → 前端容器（127.0.0.1:8082）
+#
+# 容器内部已经做完全部路由：/student/ /teacher/ 的 SPA 回退、静态缓存、
+# /api 反代到 backend:8080。所以宿主机这层只需把请求整体转进去，
+# 不要在这里再拆路径，否则两层规则容易打架。
+#
+# 用法二选一：
+#   A. 前端有独立域名 → 直接用下面整个 server 块
+#   B. 与现有站点共用域名 → 只把 ↓「location 部分」拷进你现有的 server 块
+# ─────────────────────────────────────────────────────────────────────────
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+
+    server_name  你的域名.com;          # ← 改成实际域名
+
+    # 证书路径按你现有配置填（Certbot 默认在 /etc/letsencrypt/live/<域名>/）
+    ssl_certificate     /etc/letsencrypt/live/你的域名.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/你的域名.com/privkey.pem;
+
+    # 知识库导入的 Markdown 可能较大
+    client_max_body_size 20m;
+
+    # ══════════════ location 部分（方式 B 拷这一段）══════════════
+
+    # ── AI 对话 / 课堂实况是 SSE 长连接，必须单独放行 ──────────────
+    location /api/ {
+        proxy_pass http://127.0.0.1:8082;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+
+        # 这三行是 SSE 的命门：少了会「憋住不出字」，
+        # 用户看到的现象是 AI 回复要等很久然后一次性全部出现
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;      # 心跳 15s/次，默认 60s 会掐断连接
+        proxy_send_timeout 3600s;
+
+        # 绝不能压缩 text/event-stream，压缩会引入缓冲
+        gzip off;
+    }
+
+    # ── 其余请求（页面与静态资源）──────────────────────────────────
+    location / {
+        proxy_pass http://127.0.0.1:8082;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 60s;
+    }
+
+    # ══════════════ location 部分到此 ══════════════
+}
+
+# HTTP 跳 HTTPS。若你现有配置已有这段就别重复加
+server {
+    listen 80;
+    listen [::]:80;
+    server_name 你的域名.com;
+    return 301 https://$host$request_uri;
+}
