@@ -63,8 +63,8 @@ async function submit() {
       <button class="show-btn" @click="showPwd = !showPwd">{{ showPwd ? '隐藏' : '显示' }}</button>
     </div>
 
+    <!-- 激活入口只保留页脚那一处，这里不再重复 -->
     <div class="links-row">
-      <router-link to="/activate">首次使用？激活账号</router-link>
       <a @click.prevent="toast('请联系老师重置密码')">忘记密码？</a>
     </div>
 
@@ -123,7 +123,8 @@ async function submit() {
 .links-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* 只剩「忘记密码？」一项，靠右对齐（设计稿里它就在右侧） */
+  justify-content: flex-end;
   margin-bottom: 26px;
   font-size: 13px;
   font-weight: 600;

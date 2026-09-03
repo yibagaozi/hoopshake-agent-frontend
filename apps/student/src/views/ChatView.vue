@@ -20,15 +20,41 @@ const suggestions = ref([])
 const notActivated = ref(false)
 const historyOpen = ref(false)
 const listEl = ref(null)
+const inputFloatEl = ref(null)
+/** 消息列表底部留白 = 悬浮输入区高度 + 间距，保证最后一条消息停在输入框上方 */
+const listPadBottom = ref(150)
 
 let controller = null
 let interruptFallback = null
+let inputRO = null
 
 function scrollBottom(smooth = true) {
   nextTick(() => {
     const el = listEl.value
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   })
+}
+
+function nearBottom() {
+  const el = listEl.value
+  return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+
+/**
+ * 输入区是浮动的，高度会随「建议问题」一行的出现/消失变化，
+ * 所以底部留白得跟着它量。
+ * 注意用 padding 而不是占位 div —— .msg-list 是 column flex 容器，
+ * 内容溢出时占位 div 会被 flex-shrink 压成 0（最后一条消息因此被压在输入框下面）。
+ */
+function watchInputHeight() {
+  const el = inputFloatEl.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  inputRO = new ResizeObserver(() => {
+    const stick = nearBottom()
+    listPadBottom.value = el.offsetHeight + 12
+    if (stick) scrollBottom(false)
+  })
+  inputRO.observe(el)
 }
 
 async function loadSessions() {
@@ -207,14 +233,18 @@ async function renameSession(s) {
   }
 }
 
-onMounted(async () => {
-  const list = await loadSessions()
-  if (list.length) selectSession(list[0].sessionId)
+onMounted(() => {
+  // 默认开一个新对话：只把历史列表拉回来供「对话记录」用，
+  // 不自动进入上一次会话（真正的会话在第一次发送时才创建，
+  // 见 ensureSession，所以空手进来不会产生垃圾会话）
+  loadSessions()
+  watchInputHeight()
 })
 
 onBeforeUnmount(() => {
   controller?.abort()
   clearTimeout(interruptFallback)
+  inputRO?.disconnect()
 })
 </script>
 
@@ -232,7 +262,7 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- 消息区 -->
-  <div ref="listEl" class="scroll-body msg-list">
+  <div ref="listEl" class="scroll-body msg-list" :style="{ paddingBottom: listPadBottom + 'px' }">
     <div v-if="notActivated" class="act-banner" @click="router.push('/activate')">
       账号尚未激活，暂不能使用 AI 教练。点击去激活 ›
     </div>
@@ -262,11 +292,10 @@ onBeforeUnmount(() => {
     </template>
 
     <div v-if="loadingMsgs" class="empty-hint">加载对话中…</div>
-    <div style="height: 150px"></div>
   </div>
 
   <!-- 悬浮输入区 -->
-  <div class="input-float">
+  <div ref="inputFloatEl" class="input-float">
     <div v-if="suggestions.length" class="sugg-row">
       <button
         v-for="(s, i) in suggestions"
