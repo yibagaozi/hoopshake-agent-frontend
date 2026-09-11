@@ -10,6 +10,8 @@ import {
   fromLocalInput,
   lessonApi,
   lessonStatusLabel,
+  pageItems,
+  teacherHelpApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
 import { toast } from '../toast.js'
@@ -22,6 +24,41 @@ const loading = ref(true)
 const lessons = ref([])
 const filter = ref('ALL')
 const keyword = ref('')
+
+/**
+ * 学生求助收件箱。
+ * 文档（cloud-frontend-api §3.5）只给了 POST /{requestId}/handle，
+ * 没写教师侧的列表端点，这里按同一前缀试 GET /api/teacher/help-requests。
+ * 取不到就整块不显示 —— 宁可少一个入口，也不要在概览页挂一个常红的报错。
+ */
+const helpRequests = ref([])
+const helpAvailable = ref(false)
+const handling = ref(null)
+
+async function loadHelpRequests() {
+  try {
+    const list = pageItems(await teacherHelpApi.list({ status: 'PENDING', size: 20 }))
+    helpRequests.value = list
+    helpAvailable.value = true
+  } catch {
+    helpAvailable.value = false
+  }
+}
+
+async function handleHelp(r) {
+  const reply = prompt(`回复「${r.studentName || r.studentNo || '学生'}」的求助`, '下次课重点帮你纠正')
+  if (reply === null) return
+  handling.value = r.requestId
+  try {
+    await teacherHelpApi.handle(r.requestId, { reply: reply.trim(), status: 'HANDLED' })
+    helpRequests.value = helpRequests.value.filter((x) => x.requestId !== r.requestId)
+    toast.ok('已回复')
+  } catch (err) {
+    toast.err(errText(err, '处理失败'))
+  } finally {
+    handling.value = null
+  }
+}
 
 const createOpen = ref(false)
 const creating = ref(false)
@@ -64,8 +101,9 @@ const totalStudents = computed(() => lessons.value.reduce((s, l) => s + (l.enrol
 async function load() {
   loading.value = true
   try {
-    const res = await lessonApi.list({ size: 100 })
-    lessons.value = (res?.items || []).sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    lessons.value = pageItems(await lessonApi.list({ size: 100 })).sort(
+      (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+    )
   } catch (err) {
     toast.err(errText(err, '加载课程失败'))
   } finally {
@@ -120,6 +158,7 @@ async function create() {
 onMounted(() => {
   auth.fetchMe()
   load()
+  loadHelpRequests()
 })
 </script>
 
@@ -159,6 +198,23 @@ onMounted(() => {
     </div>
 
     <div class="content">
+      <!-- 学生求助（§3.5），接口不可用时整块不渲染 -->
+      <div v-if="helpAvailable && helpRequests.length" class="panel help-box">
+        <div class="help-head">
+          <span class="help-badge">{{ helpRequests.length }}</span>
+          学生求助待处理
+        </div>
+        <div v-for="r in helpRequests" :key="r.requestId" class="help-row">
+          <div class="help-mid">
+            <div class="help-who">{{ r.studentName || r.studentNo || '学生' }}</div>
+            <div class="help-q">{{ r.question }}</div>
+          </div>
+          <button class="btn sm" :disabled="handling === r.requestId" @click="handleHelp(r)">
+            {{ handling === r.requestId ? '处理中…' : '回复' }}
+          </button>
+        </div>
+      </div>
+
       <div v-if="loading" class="cards">
         <div v-for="i in 6" :key="i" class="panel lesson-card"><div class="skeleton" style="height: 150px"></div></div>
       </div>
@@ -295,6 +351,55 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.help-box {
+  padding: 18px 22px;
+  margin-bottom: 18px;
+  border-left: 3px solid var(--brand);
+}
+.help-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.help-badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 99px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.help-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--divider);
+}
+.help-mid {
+  flex: 1;
+  min-width: 0;
+}
+.help-who {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.help-q {
+  font-size: 13px;
+  color: var(--gray);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hot {
   color: var(--brand-deep);
   font-weight: 600;

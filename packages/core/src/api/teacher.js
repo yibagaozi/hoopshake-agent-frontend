@@ -40,16 +40,40 @@ export const summaryApi = {
   exportSession: (sessionId) => http.post(`/api/teacher/summary/sessions/${sessionId}/export`),
 }
 
+/** §3.5 求助处理 /api/teacher/help-requests */
+export const teacherHelpApi = {
+  list: ({ status, page = 0, size = 20 } = {}) =>
+    http.get('/api/teacher/help-requests', { status, page, size }),
+  handle: (requestId, payload) =>
+    http.post(`/api/teacher/help-requests/${requestId}/handle`, payload),
+}
+
 /** §7 备课工作台 /api/teacher/plan（🚧 全部 50100，前端灰置） */
 export const planApi = {
   createTask: (payload) => http.post('/api/teacher/plan/tasks', payload),
   listTasks: () => http.get('/api/teacher/plan/tasks'),
 }
 
-/** §11 教师教学助手 /api/teacher/chat（🚧 全部 50100，前端灰置） */
+/**
+ * §3.1 教师教学助手 /api/teacher/chat
+ * 路径与事件同学生端对称，agentType=teaching_agent，唯一差别是**没有 interrupt**
+ * （cloud-frontend-api §3.1）。
+ */
 export const teacherChatApi = {
   createSession: (payload = {}) => http.post('/api/teacher/chat/sessions', payload),
   listSessions: (page = 0, size = 50) => http.get('/api/teacher/chat/sessions', { page, size }),
+  listMessages: (sessionId, page = 0, size = 100) =>
+    http.get(`/api/teacher/chat/sessions/${sessionId}/messages`, { page, size }),
+  /** SSE 提问：events = meta/delta/tool/rag/assist/done/error */
+  ask: (sessionId, { content, lessonId }, { onEvent, signal }) =>
+    sseRequest(`/api/teacher/chat/sessions/${sessionId}/ask`, {
+      method: 'POST',
+      body: { content, ...(lessonId ? { lessonId } : {}) },
+      onEvent,
+      signal,
+    }),
+  rename: (sessionId, title) => http.patch(`/api/teacher/chat/sessions/${sessionId}`, { title }),
+  removeSession: (sessionId) => http.delete(`/api/teacher/chat/sessions/${sessionId}`),
 }
 
 /** §12 词表 /api/meta（🚧 当前 404/50100，降级用本地映射） */

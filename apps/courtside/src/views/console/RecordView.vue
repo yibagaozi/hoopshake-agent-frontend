@@ -1,6 +1,7 @@
 <script setup>
 // 教师操作台 · 录制。录制独立于上课，可单独起停；右侧列今日已落盘的记录。
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { edgeErrText } from "@/api/http.js";
 import { useEdgeStore } from "@/stores/edge.js";
 import * as edgeApi from "@/api/edge.js";
 import { clock, hhmm, shortClock } from "@/utils/format.js";
@@ -81,7 +82,7 @@ async function loadToday() {
   try {
     today.value = await edgeApi.getTodayRecordings();
   } catch (e) {
-    message.value = e.message;
+    message.value = edgeErrText(e);
   }
 }
 
@@ -124,7 +125,7 @@ async function toggle() {
       watchSettle();
     }
   } catch (e) {
-    message.value = e.message;
+    message.value = edgeErrText(e);
   } finally {
     busy.value = false;
   }

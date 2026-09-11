@@ -24,6 +24,8 @@ export const useEdgeStore = defineStore("edge", () => {
   const disk = ref(null);
   const roster = ref(null);
   const record = ref(null);
+  /** /local/state 里的服务状态：CV 通道、mediamtx、ffmpeg（edge-frontend-api §1） */
+  const services = ref(null);
 
   /* ---------- 实时数据 ---------- */
   const actionFocus = ref(null);
@@ -88,11 +90,26 @@ export const useEdgeStore = defineStore("edge", () => {
     cameras.value.filter((c) => !c.online || !c.signal),
   );
 
-  /** CV 是否在推帧。后端暂未提供 /local/cv/status，用骨架帧活性代替 */
+  /**
+   * CV 是否可用。
+   * 以 /local/state 报的通道在线为准；字段缺失时退回骨架帧活性判断
+   * （真算法当前不发实时事件，见 edge-frontend-api §5，那时只有 mock 会有帧）。
+   */
   const cvAlive = computed(() => {
+    void now.value;
+    if (typeof services.value?.cvOnline === "boolean") return services.value.cvOnline;
+    return lastPoseAt.value > 0 && Date.now() - lastPoseAt.value < POSE_STALE_MS;
+  });
+
+  /** 骨架帧是否还在推。CV 在线但没帧，说明算法侧没开实时 worker */
+  const poseAlive = computed(() => {
     void now.value;
     return lastPoseAt.value > 0 && Date.now() - lastPoseAt.value < POSE_STALE_MS;
   });
+
+  /** 录制链路的前置依赖，任一不就绪都开不了课 */
+  const mediamtxReady = computed(() => services.value?.mediamtxReady !== false);
+  const ffmpegReady = computed(() => services.value?.ffmpegReady !== false);
 
   const anchorCamera = computed(
     () => cameras.value.find((c) => c.anchor) || cameras.value[0] || null,
@@ -110,6 +127,12 @@ export const useEdgeStore = defineStore("edge", () => {
       cameras.value = s.cameras || [];
       capture.value = s.capture;
       disk.value = s.disk;
+      // §1 说 /local/state 含 CV 通道与 mediamtx/ffmpeg 状态，字段名按各自实现兜一层
+      services.value = {
+        cvOnline: s.cv?.online ?? s.cvOnline ?? s.services?.cvOnline,
+        mediamtxReady: s.mediamtx?.ready ?? s.mediamtxReady ?? s.services?.mediamtxReady,
+        ffmpegReady: s.ffmpeg?.ready ?? s.ffmpegReady ?? s.services?.ffmpegReady,
+      };
       lastError.value = "";
     } catch (e) {
       lastError.value = e.message;
@@ -252,8 +275,8 @@ export const useEdgeStore = defineStore("edge", () => {
 
   /* ---------- 课堂控制 ---------- */
 
-  async function selectLesson(payload) {
-    const res = await edgeApi.selectLesson(payload);
+  async function selectLesson(lessonId) {
+    const res = await edgeApi.selectLesson(lessonId);
     await refresh();
     await refreshRoster();
     return res;
@@ -281,13 +304,14 @@ export const useEdgeStore = defineStore("edge", () => {
   }
 
   return {
-    edgeId, lesson, session, cameras, capture, disk, roster, record,
+    edgeId, lesson, session, cameras, capture, disk, roster, record, services,
     actionFocus, cues, alerts, personCount, enrollEvent,
     wsStatus, lastError, now,
     wsLog, wsStats, wsChannel, wsDropped, clearWsLog,
     sessionState, recording, paused, hasLesson,
     elapsedSeconds, recordElapsed,
-    camerasHealthy, camerasTotal, camerasDegraded, cvAlive, anchorCamera,
+    camerasHealthy, camerasTotal, camerasDegraded,
+    cvAlive, poseAlive, mediamtxReady, ffmpegReady, anchorCamera,
     refresh, refreshRoster, refreshRecord,
     connect, disconnect,
     selectLesson, start, pause, resume, stop,

@@ -19,9 +19,24 @@ const chips = computed(() => [
   {
     key: "cv",
     label: "CV",
-    // 后端暂未提供 /local/cv/status，用骨架帧活性判断
-    tone: edge.cvAlive ? "ok" : "warn",
-    title: edge.cvAlive ? "正在接收骨架帧" : "未收到骨架帧",
+    // 通道在线以 /local/state 为准；在线但没帧单独提示，
+    // 真算法当前不发实时事件（edge-frontend-api §5），这时「无帧」是预期的
+    tone: !edge.cvAlive ? "warn" : edge.poseAlive ? "ok" : "warn",
+    title: !edge.cvAlive
+      ? "算法通道离线"
+      : edge.poseAlive
+        ? "正在接收骨架帧"
+        : "通道在线，但未收到骨架帧",
+  },
+  {
+    key: "media",
+    label: "录制",
+    tone: edge.mediamtxReady && edge.ffmpegReady ? "ok" : "bad",
+    title: !edge.mediamtxReady
+      ? "流媒体服务未就绪（mediamtx）"
+      : !edge.ffmpegReady
+        ? "录制组件不可用（ffmpeg）"
+        : "录制链路就绪",
   },
   {
     key: "cam",

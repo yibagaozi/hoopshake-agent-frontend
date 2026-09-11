@@ -1,6 +1,7 @@
 <script setup>
 // 教师操作台 · 上课。左侧看当前动作与反馈，右侧遥控大屏、控制课堂、盯安全提醒。
 import { computed, ref } from "vue";
+import { edgeErrText } from "@/api/http.js";
 import SkeletonFigure from "@/components/SkeletonFigure.vue";
 import { useEdgeStore } from "@/stores/edge.js";
 import { useScreenStore } from "@/stores/screen.js";
@@ -63,7 +64,7 @@ async function run(key, fn) {
   try {
     await fn();
   } catch (e) {
-    toast.value = e.message;
+    toast.value = edgeErrText(e);
   } finally {
     busy.value = "";
   }
@@ -223,10 +224,11 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
             <span class="dot" :class="edge.cvAlive ? 'ok' : 'off'" />
             <span class="cv-ttl">动作识别</span>
           </div>
-          <!-- 后端暂无 /local/cv/status，这里只展示 edge 实际给得出的量 -->
+          <!-- 通道在线（/local/state）与是否真在推帧分开看：
+               真算法当前不发实时事件，只有 mock 会有帧（edge-frontend-api §5） -->
           <div class="cv-m mono">
             <span>{{ edge.personCount }}<i> 人</i></span>
-            <span>{{ edge.cvAlive ? "帧在推" : "无帧" }}</span>
+            <span>{{ !edge.cvAlive ? "通道离线" : edge.poseAlive ? "帧在推" : "无帧" }}</span>
           </div>
           <div class="cv-b">
             <button class="mini" :disabled="busy === 'cap'" @click="onRestartCapture">

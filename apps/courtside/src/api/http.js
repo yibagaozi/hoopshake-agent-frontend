@@ -1,15 +1,24 @@
 // 统一请求封装。两端响应同构：{ code, message, data, traceId, timestamp }，code=0 为成功。
 
-/** 业务错误码，与后端 EdgeErrorCode / ErrorCode 对齐 */
+/** 业务错误码，与 edge-frontend-api §0 对齐（通用码同 cloud） */
 export const ErrorCode = {
   PARAM_INVALID: 40000,
   UNAUTHORIZED: 40100,
   NOT_FOUND: 40400,
   STATE_CONFLICT: 40910,
+  // edge 特有
   CV_STATE_CONFLICT: 40911,
+  NO_LESSON: 40912,
+  ROSTER_NOT_SYNCED: 40913,
+  STUDENT_NO_FEATURE: 40914,
+  CLOUD_REJECTED: 50200,
   CLOUD_UNREACHABLE: 50320,
   CV_UNAVAILABLE: 50330,
   FFMPEG_UNAVAILABLE: 50340,
+  CAMERA_OFFLINE: 50341,
+  MEDIAMTX_NOT_READY: 50350,
+  DISK_LOW: 50700,
+  OBJECT_STORAGE_FAILED: 50701,
 };
 
 export class ApiError extends Error {
@@ -24,6 +33,35 @@ export class ApiError extends Error {
   get offline() {
     return this.code === 0;
   }
+}
+
+/** 错误码 → 现场能看懂的文案。没登记的落到后端 message */
+export const ERROR_TEXT = {
+  [ErrorCode.PARAM_INVALID]: "参数有误，请检查输入",
+  [ErrorCode.UNAUTHORIZED]: "请先登录",
+  [ErrorCode.NOT_FOUND]: "内容不存在",
+  [ErrorCode.STATE_CONFLICT]: "当前状态不允许此操作",
+  [ErrorCode.CV_STATE_CONFLICT]: "算法通道状态冲突，请稍后重试",
+  [ErrorCode.NO_LESSON]: "尚未选课，请先选择本节课",
+  [ErrorCode.ROSTER_NOT_SYNCED]: "名单还没拉取，请先同步名单",
+  [ErrorCode.STUDENT_NO_FEATURE]: "该学生还没有人脸特征，需要先现场注册",
+  [ErrorCode.CLOUD_REJECTED]: "云端拒绝了这次请求",
+  [ErrorCode.CLOUD_UNREACHABLE]: "连不上云端，请检查网络",
+  [ErrorCode.CV_UNAVAILABLE]: "算法服务不可用",
+  [ErrorCode.FFMPEG_UNAVAILABLE]: "录制组件不可用（ffmpeg）",
+  [ErrorCode.CAMERA_OFFLINE]: "机位离线，请检查采集卡与线缆",
+  [ErrorCode.MEDIAMTX_NOT_READY]: "流媒体服务未就绪（mediamtx）",
+  [ErrorCode.DISK_LOW]: "磁盘空间不足，请清理后重试",
+  [ErrorCode.OBJECT_STORAGE_FAILED]: "对象存储写入失败",
+};
+
+/** 把任意错误转成可展示文案 */
+export function edgeErrText(err, fallback = "操作失败，请稍后重试") {
+  if (err instanceof ApiError) {
+    if (err.offline) return err.message;
+    return ERROR_TEXT[err.code] || err.message || fallback;
+  }
+  return err?.message || fallback;
 }
 
 export async function request(url, { method = "GET", body, token } = {}) {

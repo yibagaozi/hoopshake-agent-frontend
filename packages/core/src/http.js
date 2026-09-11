@@ -2,7 +2,8 @@
  * HOOPSHAKE Cloud API 统一请求层
  * - 信封解包：{ code, message, data, traceId, timestamp }，code=0 成功
  * - 40101（access 过期）自动 refresh 并重放一次（单飞）
- * - 40100 / 40103 触发 onUnauthorized 回调（跳登录）
+ * - 40100（未登录）/ 40102（凭证无效）/ 40103 清登录态并跳登录
+ *   40102 不能走 refresh 重放：签名不对或已被吊销，重放只会再失败一次
  */
 
 const config = {
@@ -61,13 +62,22 @@ export class ApiError extends Error {
     this.traceId = traceId || null
   }
 
+  /** 文档约定 { field, message }；早期实现用过 reason，两种都读 */
   get fieldErrors() {
-    return this.data?.fieldErrors || []
+    return (this.data?.fieldErrors || []).map((f) => ({
+      field: f.field,
+      message: f.message ?? f.reason ?? '',
+    }))
   }
 }
 
 export function isCode(err, code) {
   return err instanceof ApiError && err.code === code
+}
+
+/** 触发宿主应用的「跳登录」回调（SSE 分支也要能用同一套处理） */
+export function onUnauthorized() {
+  config.onUnauthorized?.()
 }
 
 /* ---------------- refresh 单飞 ---------------- */
@@ -166,7 +176,7 @@ export async function request(method, path, opts = {}) {
       await ensureRefreshed()
       return rawRequest(method, path, opts)
     }
-    if (isCode(err, 40100)) {
+    if (isCode(err, 40100) || isCode(err, 40102) || isCode(err, 40103)) {
       clearAuth()
       config.onUnauthorized?.()
     }

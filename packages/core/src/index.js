@@ -12,11 +12,20 @@ export {
   apiBaseUrl,
 } from './http.js'
 export { sseRequest } from './sse.js'
+export { normalizePage, pageItems } from './page.js'
 export { renderMarkdown } from './markdown.js'
 export { ERROR_MESSAGES, errText, isNotOpen } from './errors.js'
 export * from './enums.js'
 export * from './format.js'
 export { authApi } from './api/auth.js'
-export { studentChatApi, studentDataApi } from './api/student.js'
-export { lessonApi, teacherStudentApi, summaryApi, planApi, teacherChatApi, metaApi } from './api/teacher.js'
+export { studentChatApi, studentDataApi, studentHelpApi } from './api/student.js'
+export {
+  lessonApi,
+  teacherStudentApi,
+  summaryApi,
+  planApi,
+  teacherChatApi,
+  teacherHelpApi,
+  metaApi,
+} from './api/teacher.js'
 export { knowledgeApi } from './api/admin.js'

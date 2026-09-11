@@ -1,6 +1,7 @@
 <script setup>
 // 教师操作台 · 现场注册。输学号 → 匹配 → 采集 5 帧建档 → 重拉名单。
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { edgeErrText } from "@/api/http.js";
 import { useRoute } from "vue-router";
 import EnrollSkeleton from "@/components/EnrollSkeleton.vue";
 import { useEdgeStore } from "@/stores/edge.js";
@@ -70,7 +71,7 @@ async function match() {
     }
   } catch (e) {
     problem.value = "error";
-    problemText.value = e.message;
+    problemText.value = edgeErrText(e);
   } finally {
     matching.value = false;
   }
@@ -93,7 +94,7 @@ async function startCapture() {
     watchProgress();
   } catch (e) {
     problem.value = "error";
-    problemText.value = e.message;
+    problemText.value = edgeErrText(e);
   }
 }
 
@@ -120,7 +121,7 @@ function watchProgress() {
     } catch (e) {
       clearInterval(poller);
       problem.value = "error";
-      problemText.value = e.message;
+      problemText.value = edgeErrText(e);
     }
   }, 800);
 }

@@ -1,9 +1,19 @@
 /**
  * SSE 客户端（基于 fetch，支持 Authorization 头与 POST 请求体）
  * 事件流格式：event:/data: 行，空行分隔；`: ping` 心跳注释自动忽略。
- * 非 2xx 或 JSON 响应视为信封错误；40101 自动刷新并重试一次。
+ * 非 2xx 或 JSON 响应视为信封错误；40101 自动刷新并重试一次，
+ * 40100/40102/40103 清登录态并跳登录。
+ * 事件词表见 cloud-frontend-api §2.1：meta/delta/tool/rag/assist/done/error。
  */
-import { ApiError, apiBaseUrl, ensureRefreshed, getAccessToken, isCode } from './http.js'
+import {
+  ApiError,
+  apiBaseUrl,
+  clearAuth,
+  ensureRefreshed,
+  getAccessToken,
+  isCode,
+  onUnauthorized,
+} from './http.js'
 
 function parseEventBlock(block, onEvent) {
   let event = 'message'
@@ -62,6 +72,12 @@ export async function sseRequest(path, { method = 'POST', body, onEvent, signal,
       if (isCode(err, 40101) && !_retried) {
         await ensureRefreshed()
         return sseRequest(path, { method, body, onEvent, signal, _retried: true })
+      }
+      // 与 http.js 的 request 保持同一套登录态处理，否则 SSE 失效时
+      // 页面会一直停在对话页反复报错，不跳登录
+      if (isCode(err, 40100) || isCode(err, 40102) || isCode(err, 40103)) {
+        clearAuth()
+        onUnauthorized()
       }
       throw err
     }

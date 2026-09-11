@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { KNOWLEDGE_STATUS, errText, fmtDateTime, knowledgeApi } from '@hoopshake/core'
+import { KNOWLEDGE_STATUS, errText, fmtDateTime, knowledgeApi, normalizePage } from '@hoopshake/core'
 import { toast } from '../toast.js'
 import Modal from '../components/Modal.vue'
 
@@ -29,11 +29,11 @@ const hasProcessing = computed(() => items.value.some((d) => d.status === 'PROCE
 async function load(p = page.value, silent = false) {
   if (!silent) loading.value = true
   try {
-    const res = await knowledgeApi.list(p, 20)
-    items.value = res?.items || []
-    page.value = res?.page ?? p
-    totalPages.value = res?.totalPages ?? 0
-    totalElements.value = res?.totalElements ?? items.value.length
+    const res = normalizePage(await knowledgeApi.list(p, 20))
+    items.value = res.content
+    page.value = res.page
+    totalPages.value = res.totalPages
+    totalElements.value = res.total
     schedulePoll()
   } catch (err) {
     if (!silent) toast.err(errText(err, '加载知识库失败'))

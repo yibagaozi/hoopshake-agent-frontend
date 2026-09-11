@@ -9,6 +9,7 @@ import {
   fmtDate,
   fmtMs,
   isNotOpen,
+  pageItems,
   studentDataApi,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
@@ -110,8 +111,8 @@ onMounted(async () => {
       studentDataApi.clips(props.sessionId, { size: 100 }),
       studentDataApi.feedback(props.sessionId, { size: 100 }),
     ])
-    clips.value = cRes?.items || []
-    feedback.value = (fRes?.items || []).sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt))
+    clips.value = pageItems(cRes)
+    feedback.value = pageItems(fRes).sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt))
   } catch (err) {
     toast.err(errText(err, '加载报告失败'))
   } finally {

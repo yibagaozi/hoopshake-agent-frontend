@@ -1,7 +1,16 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { errText, fmtFriendly, isCode, renderMarkdown, studentChatApi } from '@hoopshake/core'
+import {
+  errText,
+  fmtFriendly,
+  isCode,
+  normalizePage,
+  pageItems,
+  renderMarkdown,
+  studentChatApi,
+  studentHelpApi,
+} from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
 import { toast } from '../toast.js'
 import TabBar from '../components/TabBar.vue'
@@ -19,6 +28,10 @@ const loadingMsgs = ref(false)
 const suggestions = ref([])
 const notActivated = ref(false)
 const historyOpen = ref(false)
+/** SSE 的 assist 事件：多轮未解时后端建议转人工，{show,question,reason} */
+const assist = ref(null)
+const assistSending = ref(false)
+const assistSent = ref(null)
 const listEl = ref(null)
 const inputFloatEl = ref(null)
 /** 消息列表底部留白 = 悬浮输入区高度 + 间距，保证最后一条消息停在输入框上方 */
@@ -59,8 +72,7 @@ function watchInputHeight() {
 
 async function loadSessions() {
   try {
-    const page = await studentChatApi.listSessions(0, 50)
-    sessions.value = page?.items || []
+    sessions.value = pageItems(await studentChatApi.listSessions(0, 50))
     return sessions.value
   } catch (err) {
     toast.err(errText(err, '加载会话失败'))
@@ -75,9 +87,9 @@ async function loadMessages(sessionId) {
     const all = []
     let page = 0
     for (;;) {
-      const res = await studentChatApi.listMessages(sessionId, page, 100)
-      all.push(...(res?.items || []))
-      if (!res?.hasNext || page >= 4) break
+      const res = normalizePage(await studentChatApi.listMessages(sessionId, page, 100))
+      all.push(...res.content)
+      if (!res.hasNext || page >= 4) break
       page++
     }
     all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
@@ -104,6 +116,8 @@ async function selectSession(sessionId) {
   if (streaming.value) await stopStreaming()
   currentId.value = sessionId
   suggestions.value = []
+  assist.value = null
+  assistSent.value = null
   historyOpen.value = false
   await loadMessages(sessionId)
 }
@@ -114,6 +128,8 @@ async function newSession() {
   currentId.value = null
   messages.value = []
   suggestions.value = []
+  assist.value = null
+  assistSent.value = null
 }
 
 async function ensureSession() {
@@ -130,6 +146,7 @@ async function send(text) {
   input.value = ''
   suggestions.value = []
   notActivated.value = false
+  assist.value = null
 
   messages.value.push({ id: `u-${Date.now()}`, role: 'USER', content })
   const draft = { id: `a-${Date.now()}`, role: 'ASSISTANT', content: '', streaming: true, tools: [] }
@@ -163,6 +180,10 @@ async function send(text) {
           } else if (event === 'delta') {
             draft.content += data?.text || ''
             scrollBottom()
+          } else if (event === 'assist') {
+            // 后端判定多轮没讲清楚，建议转人工；show=false 时不弹
+            assist.value = data?.show ? data : null
+            if (assist.value) scrollBottom()
           } else if (event === 'done') {
             draft.streaming = false
             if (data?.finishReason === 'interrupted') draft.interrupted = true
@@ -197,6 +218,33 @@ async function send(text) {
     loadSessions()
     scrollBottom()
   }
+}
+
+async function requestTeacher() {
+  if (assistSending.value || !assist.value) return
+  assistSending.value = true
+  try {
+    const res = await studentHelpApi.create({
+      question: assist.value.question || lastUserQuestion(),
+      sessionId: currentId.value || undefined,
+      reason: assist.value.reason || undefined,
+    })
+    assistSent.value = res || {}
+    assist.value = null
+    scrollBottom()
+  } catch (err) {
+    toast.err(errText(err, '发送失败，请稍后再试'))
+  } finally {
+    assistSending.value = false
+  }
+}
+
+/** assist 没带 question 时兜底用最后一条用户提问 */
+function lastUserQuestion() {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'USER') return messages.value[i].content
+  }
+  return ''
 }
 
 async function stopStreaming() {
@@ -290,6 +338,33 @@ onBeforeUnmount(() => {
         <div v-if="m.interrupted" class="interrupted">已停止生成</div>
       </div>
     </template>
+
+    <!-- SSE assist 事件：建议转人工 -->
+    <div v-if="assist" class="assist-card">
+      <div class="assist-top">
+        <span class="assist-ic">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="7.5" r="3.4" stroke="currentColor" stroke-width="1.9" />
+            <path d="M5.5 20c0-3.4 2.9-5.6 6.5-5.6s6.5 2.2 6.5 5.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+          </svg>
+        </span>
+        <div>
+          <div class="assist-t">需要老师进一步指导？</div>
+          <div class="assist-s">{{ assist.reason || '把这段对话与你的动作数据一并发给老师，下次课重点帮你纠正。' }}</div>
+        </div>
+      </div>
+      <button class="assist-btn" :disabled="assistSending" @click="requestTeacher">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M4 5.5h16v10H9l-4 3.5v-3.5H4z" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" />
+        </svg>
+        {{ assistSending ? '发送中…' : '请求老师当面指导' }}
+      </button>
+    </div>
+
+    <div v-if="assistSent" class="assist-done">
+      <span class="assist-dot"></span>
+      已发送给 {{ assistSent.teacherName || '任课' }} 老师 · 下次课重点关注
+    </div>
 
     <div v-if="loadingMsgs" class="empty-hint">加载对话中…</div>
   </div>
@@ -411,6 +486,77 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   padding: 12px 15px;
   cursor: pointer;
+}
+.assist-card {
+  align-self: stretch;
+  background: var(--card);
+  border: 1.5px solid var(--brand);
+  border-radius: 22px;
+  padding: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.assist-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.assist-ic {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.assist-t {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.assist-s {
+  font-size: 13px;
+  color: var(--gray);
+  line-height: 1.5;
+}
+.assist-btn {
+  width: 100%;
+  height: 50px;
+  border: none;
+  border-radius: 14px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 6px 16px var(--brand-glow);
+}
+.assist-btn:disabled {
+  opacity: 0.6;
+}
+.assist-done {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #7c7c80;
+  background: var(--line);
+  border-radius: 99px;
+  padding: 6px 13px;
+}
+.assist-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
 }
 .time-chip {
   align-self: center;

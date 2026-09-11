@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { errText, fmtMonthDay, sessionStatusLabel, studentDataApi } from '@hoopshake/core'
+import { errText, fmtMonthDay, normalizePage, sessionStatusLabel, studentDataApi } from '@hoopshake/core'
 import { toast } from '../toast.js'
 import TabBar from '../components/TabBar.vue'
 
@@ -14,10 +14,10 @@ const hasNext = ref(false)
 async function load(p = 0) {
   loading.value = true
   try {
-    const res = await studentDataApi.sessions({ page: p, size: 20 })
-    items.value = p === 0 ? res?.items || [] : [...items.value, ...(res?.items || [])]
-    page.value = res?.page ?? p
-    hasNext.value = !!res?.hasNext
+    const res = normalizePage(await studentDataApi.sessions({ page: p, size: 20 }))
+    items.value = p === 0 ? res.content : [...items.value, ...res.content]
+    page.value = res.page
+    hasNext.value = res.hasNext
   } catch (err) {
     toast.err(errText(err, '加载训练记录失败'))
   } finally {

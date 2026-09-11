@@ -1,6 +1,7 @@
 <script setup>
 // 教师操作台 · 名单。看本地缓存的参课名单，未建档的学生一键跳去现场注册。
 import { computed, onMounted, ref } from "vue";
+import { edgeErrText } from "@/api/http.js";
 import { useRouter } from "vue-router";
 import { useEdgeStore } from "@/stores/edge.js";
 import { useScreenStore } from "@/stores/screen.js";
@@ -40,7 +41,7 @@ async function resync() {
     await edgeApi.syncRoster(edge.lesson.lessonId);
     await edge.refreshRoster();
   } catch (e) {
-    message.value = e.message;
+    message.value = edgeErrText(e);
   } finally {
     syncing.value = false;
   }

@@ -47,7 +47,8 @@ export async function listLessons(token, status = "PLANNED,ONGOING") {
     url(`/api/teacher/lessons?status=${encodeURIComponent(status)}`),
     { token },
   );
-  // 云端可能返回裸数组或分页包裹，两种都接
+  // 云端分页体按文档是 PageResponse{content,...}；早期实现用过 items，
+  // 少数端点还会直接给裸数组，三种都接，省得字段名一变整页空白
   if (Array.isArray(data)) return data;
-  return data?.items || data?.records || data?.content || [];
+  return data?.content || data?.items || data?.records || [];
 }

@@ -1,6 +1,7 @@
 <script setup>
 // 顶部课程选择。课程列表来自云端，选定后把配置透传给 edge（POST /local/lesson/select）。
 import { computed, ref } from "vue";
+import { edgeErrText } from "@/api/http.js";
 import { useAuthStore } from "@/stores/auth.js";
 import { useEdgeStore } from "@/stores/edge.js";
 
@@ -37,17 +38,11 @@ async function pick(lesson) {
   busy.value = true;
   message.value = "";
   try {
-    await edge.selectLesson({
-      lessonId: lesson.lessonId,
-      title: lesson.title,
-      classCode: lesson.classCode,
-      actionTypes: lesson.actionTypes || [],
-      enabledCheckpoints: lesson.enabledCheckpoints || [],
-      zoneConfigRef: lesson.zoneConfigRef || null,
-    });
+    // 只传 lessonId，课程上下文由 edge 自己去云端拉（见 api/edge.js selectLesson）
+    await edge.selectLesson(lesson.lessonId);
     open.value = false;
   } catch (e) {
-    message.value = e.message;
+    message.value = edgeErrText(e);
   } finally {
     busy.value = false;
   }

@@ -8,6 +8,7 @@ import {
   errText,
   isCode,
   nameInitial,
+  normalizePage,
   teacherStudentApi,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
@@ -43,11 +44,13 @@ let searchTimer = null
 async function load(p = 0) {
   loading.value = true
   try {
-    const res = await teacherStudentApi.list({ keyword: keyword.value.trim() || undefined, page: p, size })
-    items.value = res?.items || []
-    page.value = res?.page ?? p
-    totalPages.value = res?.totalPages ?? 0
-    totalElements.value = res?.totalElements ?? items.value.length
+    const res = normalizePage(
+      await teacherStudentApi.list({ keyword: keyword.value.trim() || undefined, page: p, size })
+    )
+    items.value = res.content
+    page.value = res.page
+    totalPages.value = res.totalPages
+    totalElements.value = res.total
   } catch (err) {
     toast.err(errText(err, '加载学生失败'))
   } finally {

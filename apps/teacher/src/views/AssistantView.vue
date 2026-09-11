@@ -1,26 +1,176 @@
 <script setup>
-import { ref } from 'vue'
-import { errText, isNotOpen, teacherChatApi } from '@hoopshake/core'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  errText,
+  fmtFriendly,
+  isCode,
+  normalizePage,
+  pageItems,
+  renderMarkdown,
+  teacherChatApi,
+} from '@hoopshake/core'
 import { toast } from '../toast.js'
 
-const checking = ref(false)
+const sessions = ref([])
+const currentId = ref(null)
+const messages = ref([]) // { id, role, content, streaming?, tools?: [] }
 const input = ref('')
+const streaming = ref(false)
+const loadingMsgs = ref(false)
+const suggestions = ref([])
+const bodyEl = ref(null)
 
-async function probe() {
-  checking.value = true
+let controller = null
+
+function scrollBottom(smooth = true) {
+  nextTick(() => {
+    const el = bodyEl.value
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  })
+}
+
+async function loadSessions() {
   try {
-    await teacherChatApi.listSessions()
-    toast.ok('教学助手接口已开放！请联系前端同学启用完整功能')
+    sessions.value = pageItems(await teacherChatApi.listSessions(0, 50))
   } catch (err) {
-    toast.err(isNotOpen(err) ? '教学助手暂未开放（50100）' : errText(err))
+    toast.err(errText(err, '加载会话失败'))
+  }
+  return sessions.value
+}
+
+async function loadMessages(sessionId) {
+  loadingMsgs.value = true
+  messages.value = []
+  try {
+    const all = []
+    let page = 0
+    for (;;) {
+      const res = normalizePage(await teacherChatApi.listMessages(sessionId, page, 100))
+      all.push(...res.content)
+      if (!res.hasNext || page >= 4) break
+      page++
+    }
+    all.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    messages.value = all.map((m) => ({
+      id: m.messageId,
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt,
+    }))
+    scrollBottom(false)
+  } catch (err) {
+    if (isCode(err, 40400)) {
+      sessions.value = sessions.value.filter((s) => s.sessionId !== sessionId)
+      currentId.value = null
+    } else {
+      toast.err(errText(err, '加载消息失败'))
+    }
   } finally {
-    checking.value = false
+    loadingMsgs.value = false
   }
 }
 
-function trySend() {
-  toast.err('教学助手暂未开放（接口返回 50100）')
+async function selectSession(sessionId) {
+  if (streaming.value) return
+  currentId.value = sessionId
+  suggestions.value = []
+  await loadMessages(sessionId)
 }
+
+function newSession() {
+  if (streaming.value) return
+  currentId.value = null
+  messages.value = []
+  suggestions.value = []
+}
+
+/** 会话在第一次发送时才建，空手点「新建对话」不会留下垃圾会话 */
+async function ensureSession() {
+  if (currentId.value) return currentId.value
+  const created = await teacherChatApi.createSession({})
+  currentId.value = created.sessionId
+  sessions.value.unshift(created)
+  return created.sessionId
+}
+
+async function send(text) {
+  const content = (text ?? input.value).trim()
+  if (!content || streaming.value) return
+  input.value = ''
+  suggestions.value = []
+
+  messages.value.push({ id: `u-${Date.now()}`, role: 'USER', content })
+  const draft = { id: `a-${Date.now()}`, role: 'ASSISTANT', content: '', streaming: true, tools: [] }
+  messages.value.push(draft)
+  streaming.value = true
+  scrollBottom()
+
+  let sessionId
+  try {
+    sessionId = await ensureSession()
+  } catch (err) {
+    streaming.value = false
+    messages.value = messages.value.filter((m) => m !== draft)
+    toast.err(errText(err, '创建会话失败'))
+    return
+  }
+
+  controller = new AbortController()
+  try {
+    await teacherChatApi.ask(
+      sessionId,
+      { content },
+      {
+        signal: controller.signal,
+        onEvent: (event, data) => {
+          if (event === 'meta') {
+            if (data?.messageId) draft.id = data.messageId
+          } else if (event === 'tool') {
+            draft.tools.push(data)
+            scrollBottom()
+          } else if (event === 'delta') {
+            draft.content += data?.text || ''
+            scrollBottom()
+          } else if (event === 'done') {
+            draft.streaming = false
+            suggestions.value = data?.suggestions || []
+          } else if (event === 'error') {
+            draft.streaming = false
+            draft.error = true
+            toast.err(data?.message || data?.error || 'AI 回复失败')
+          }
+          // rag / assist：教师端不展示，忽略
+        },
+      }
+    )
+  } catch (err) {
+    draft.error = true
+    if (isCode(err, 42910)) toast.err('今日 AI 用量已用完，请明天再试')
+    else if (isCode(err, 50310)) toast.err('AI 服务暂不可用，请稍后再试')
+    else toast.err(errText(err, '发送失败'))
+  } finally {
+    draft.streaming = false
+    if (draft.error && !draft.content) messages.value = messages.value.filter((m) => m !== draft)
+    streaming.value = false
+    controller = null
+    loadSessions()
+    scrollBottom()
+  }
+}
+
+async function removeSession(s) {
+  if (!confirm(`删除会话「${s.title || '未命名对话'}」？`)) return
+  try {
+    await teacherChatApi.removeSession(s.sessionId)
+    sessions.value = sessions.value.filter((x) => x.sessionId !== s.sessionId)
+    if (currentId.value === s.sessionId) newSession()
+  } catch (err) {
+    toast.err(errText(err))
+  }
+}
+
+onMounted(loadSessions)
+onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
@@ -29,20 +179,18 @@ function trySend() {
       <div>
         <div class="head-title-row">
           <h2 class="page-title">教学助手</h2>
-          <span class="pill warn">未开放</span>
         </div>
-        <p class="page-sub">向教学助手提问、检索知识库并做多人分析（接口 /api/teacher/chat 返回 50100）</p>
+        <p class="page-sub">向助手提问、检索知识库，并基于本班课堂数据做多人分析</p>
       </div>
-      <button class="btn" :disabled="checking" @click="probe">{{ checking ? '检测中…' : '检测接口状态' }}</button>
     </div>
 
     <div class="content" style="padding: 0; display: flex; overflow: hidden">
-      <!-- 会话列表（占位） -->
+      <!-- 会话列表 -->
       <div class="threads">
         <div class="th-head">
           <div style="font-size: 19px; font-weight: 700; letter-spacing: -0.02em">对话</div>
         </div>
-        <button class="new-btn" @click="trySend">
+        <button class="new-btn" :disabled="streaming" @click="newSession">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
             <line x1="12" y1="5" x2="12" y2="19" stroke="#fff" stroke-width="2.2" stroke-linecap="round" />
             <line x1="5" y1="12" x2="19" y2="12" stroke="#fff" stroke-width="2.2" stroke-linecap="round" />
@@ -50,17 +198,19 @@ function trySend() {
           新建对话
         </button>
         <div class="th-list">
-          <div class="th-row dim">
-            <div class="tt">2026060002 收肘专项设计</div>
-            <div class="ts">接口开放后可用</div>
-          </div>
-          <div class="th-row dim">
-            <div class="tt">安全 · 膝内扣防护建议</div>
-            <div class="ts">接口开放后可用</div>
-          </div>
-          <div class="th-row dim">
-            <div class="tt">3 人批量分析 · 收肘专项</div>
-            <div class="ts">接口开放后可用</div>
+          <div v-if="!sessions.length" class="th-empty">还没有历史对话</div>
+          <div
+            v-for="s in sessions"
+            :key="s.sessionId"
+            class="th-row"
+            :class="{ on: s.sessionId === currentId }"
+            @click="selectSession(s.sessionId)"
+          >
+            <div class="th-mid">
+              <div class="tt">{{ s.title || '未命名对话' }}</div>
+              <div class="ts">{{ fmtFriendly(s.updatedAt || s.createdAt) }}</div>
+            </div>
+            <button class="th-del" title="删除" @click.stop="removeSession(s)">×</button>
           </div>
         </div>
       </div>
@@ -72,24 +222,49 @@ function trySend() {
           <div>
             <div style="font-size: 16px; font-weight: 700">教学助手</div>
             <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray)">
-              <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--gray-3)"></span>
-              Teaching Agent · 待开放
+              <span class="live-dot"></span>
+              Teaching Agent · 检索备课知识库
             </div>
           </div>
         </div>
-        <div class="conv-body">
-          <div class="wip-center">
-            <span class="ic">🚧</span>
-            <div class="t">教学助手暂未开放</div>
-            <div class="s">
-              开放后你可以：向助手提问教学问题、基于课堂数据做多人对比分析、<br />
-              生成纠正练习与讲解稿，并一键导出为教案。
+
+        <div ref="bodyEl" class="conv-body">
+          <div v-if="!messages.length && !loadingMsgs" class="greet">
+            <div class="bubble ai">
+              你好，我是教学助手。可以基于本班课堂数据帮你分析共性问题、设计纠正练习或起草讲解稿。
             </div>
           </div>
+
+          <template v-for="m in messages" :key="m.id">
+            <div v-if="m.tools?.length" class="tool-trace">
+              <div v-for="(t, ti) in m.tools" :key="ti" class="tool-line">
+                <span class="tool-dot">✓</span>{{ t.label || t.name }}
+              </div>
+            </div>
+            <div class="bubble" :class="m.role === 'USER' ? 'user' : 'ai'">
+              <span v-if="m.role === 'USER'" style="white-space: pre-wrap">{{ m.content }}</span>
+              <template v-else>
+                <div class="md" v-html="renderMarkdown(m.content)"></div><span v-if="m.streaming" class="caret"></span>
+              </template>
+            </div>
+          </template>
+
+          <div v-if="loadingMsgs" class="th-empty">加载对话中…</div>
         </div>
+
+        <div v-if="suggestions.length" class="sugg-row">
+          <button v-for="s in suggestions" :key="s" class="sugg" @click="send(s)">{{ s }}</button>
+        </div>
+
         <div class="conv-input">
-          <input v-model="input" placeholder="向教学助手提问，或让它帮你备课…（暂未开放）" disabled />
-          <button class="send" @click="trySend">
+          <input
+            v-model="input"
+            :placeholder="messages.length ? '继续问教学助手…' : '向教学助手提问，或让它帮你备课…'"
+            maxlength="2000"
+            :disabled="streaming"
+            @keyup.enter="send()"
+          />
+          <button class="send" :disabled="streaming" @click="send()">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
               <path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
@@ -126,6 +301,8 @@ function trySend() {
   font-weight: 600;
   color: #fff;
   box-shadow: 0 5px 14px var(--brand-glow);
+}
+.new-btn:disabled {
   opacity: 0.55;
 }
 .th-list {
@@ -136,12 +313,42 @@ function trySend() {
   flex-direction: column;
   gap: 4px;
 }
+.th-empty {
+  padding: 18px 15px;
+  font-size: 13px;
+  color: var(--gray-2);
+  text-align: center;
+}
 .th-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 14px 15px;
   border-radius: 14px;
+  cursor: pointer;
 }
-.th-row.dim {
-  opacity: 0.55;
+.th-row:hover {
+  background: var(--fill);
+}
+.th-row.on {
+  background: var(--brand-soft);
+}
+.th-mid {
+  flex: 1;
+  min-width: 0;
+}
+.th-del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: var(--gray-2);
+  font-size: 18px;
+  line-height: 1;
+}
+.th-del:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 .tt {
   font-size: 15px;
@@ -180,7 +387,6 @@ function trySend() {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.55;
 }
 .logo .ring {
   width: 14px;
@@ -188,29 +394,159 @@ function trySend() {
   border-radius: 50%;
   border: 2.2px solid #fff;
 }
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
 .conv-body {
   flex: 1;
+  overflow-y: auto;
+  padding: 26px 30px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 30px;
+  flex-direction: column;
+  gap: 14px;
 }
-.wip-center {
-  text-align: center;
-  max-width: 480px;
+.greet {
+  display: flex;
 }
-.wip-center .ic {
-  font-size: 36px;
+.bubble {
+  max-width: 76%;
+  padding: 14px 17px;
+  font-size: 15px;
+  line-height: 1.6;
 }
-.wip-center .t {
-  font-size: 20px;
+.bubble.ai {
+  align-self: flex-start;
+  background: #fff;
+  color: var(--ink);
+  border-radius: 22px 20px 20px 6px;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: var(--brand);
+  color: #fff;
+  border-radius: 20px 20px 6px 20px;
+}
+/* 气泡内的 Markdown 排版：与学生端同一套，紧凑、跟随气泡字号 */
+.md {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.md :deep(> *:first-child) {
+  margin-top: 0;
+}
+.md :deep(> *:last-child) {
+  margin-bottom: 0;
+}
+.md :deep(p) {
+  margin: 0 0 8px;
+}
+.md :deep(h3),
+.md :deep(h4),
+.md :deep(h5) {
+  font-size: 15px;
   font-weight: 700;
-  margin: 12px 0 10px;
+  margin: 12px 0 6px;
 }
-.wip-center .s {
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 6px 0 8px;
+  padding-left: 20px;
+}
+.md :deep(li) {
+  margin: 3px 0;
+}
+.md :deep(li)::marker {
+  color: var(--gray-2);
+}
+.md :deep(strong) {
+  font-weight: 700;
+  color: var(--brand-deep);
+}
+.md :deep(code) {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--fill-2);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md :deep(pre) {
+  background: var(--fill);
+  border-radius: 12px;
+  padding: 11px 13px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.md :deep(pre code) {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.md :deep(blockquote) {
+  margin: 8px 0;
+  padding: 2px 0 2px 11px;
+  border-left: 3px solid var(--line-2);
+  color: var(--ink-3);
+}
+.md :deep(a) {
+  color: var(--brand-deep);
+  text-decoration: underline;
+}
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  margin-left: 2px;
+  background: var(--brand);
+  vertical-align: -2px;
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+.tool-trace {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   font-size: 13px;
   color: var(--gray);
-  line-height: 1.7;
+}
+.tool-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.tool-dot {
+  color: var(--ok);
+  font-weight: 700;
+}
+.sugg-row {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  margin: 0 30px 12px;
+  overflow-x: auto;
+}
+.sugg {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 9px 15px;
+  white-space: nowrap;
+}
+.sugg:hover {
+  border-color: var(--brand);
+  color: var(--brand-deep);
 }
 .conv-input {
   flex: none;
@@ -243,6 +579,8 @@ function trySend() {
   align-items: center;
   justify-content: center;
   flex: none;
+}
+.send:disabled {
   opacity: 0.55;
 }
 </style>

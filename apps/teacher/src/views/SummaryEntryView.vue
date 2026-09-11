@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { errText, lessonApi, lessonStatusLabel } from '@hoopshake/core'
+import { errText, lessonApi, lessonStatusLabel, pageItems } from '@hoopshake/core'
 import { toast } from '../toast.js'
 
 const router = useRouter()
@@ -12,8 +12,7 @@ const probing = ref(null) // lessonId 正在探测
 
 async function load() {
   try {
-    const res = await lessonApi.list({ size: 100 })
-    lessons.value = (res?.items || []).filter((l) => l.status !== 'PLANNED')
+    lessons.value = pageItems(await lessonApi.list({ size: 100 })).filter((l) => l.status !== 'PLANNED')
   } catch (err) {
     toast.err(errText(err, '加载课程失败'))
   } finally {
