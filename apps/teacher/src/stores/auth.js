@@ -18,8 +18,9 @@ export const useAuthStore = defineStore('auth', {
     displayName() {
       return this.user?.displayName || this.user?.username || '老师'
     },
+    /** admin 也带课，登录后同样落在课程概览；运维台从侧栏进 */
     homePath() {
-      return this.isAdmin ? '/knowledge' : '/lessons'
+      return '/lessons'
     },
   },
   actions: {

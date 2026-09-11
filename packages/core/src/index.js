@@ -29,3 +29,15 @@ export {
   metaApi,
 } from './api/teacher.js'
 export { knowledgeApi } from './api/admin.js'
+export {
+  opsApi,
+  opsChatApi,
+  EDGE_HEALTH,
+  edgeHealthLabel,
+  edgeHealthTone,
+  CIRCUIT_STATE,
+  circuitLabel,
+  circuitTone,
+  pct,
+  num,
+} from './api/ops.js'

@@ -17,9 +17,13 @@ const teacherItems = [
   { key: 'summary', label: '课末汇总', to: '/summary' },
 ]
 
-const adminItems = [{ key: 'knowledge', label: '知识库', to: '/knowledge' }]
+/** ADMIN 专属：知识库与运维台。admin 同时也是老师，所以是在教师那几项之后追加 */
+const adminItems = [
+  { key: 'knowledge', label: '知识库', to: '/knowledge', divide: true },
+  { key: 'ops', label: '运维', to: '/ops' },
+]
 
-const items = computed(() => (auth.isAdmin ? adminItems : teacherItems))
+const items = computed(() => (auth.isAdmin ? [...teacherItems, ...adminItems] : teacherItems))
 
 function go(item) {
   router.push(item.to)
@@ -38,13 +42,13 @@ async function logout() {
       <div class="logo">
         <div class="ring"></div>
       </div>
-      <button
-        v-for="item in items"
-        :key="item.key"
-        class="nav-item"
-        :class="{ on: route.meta.nav === item.key }"
-        @click="go(item)"
-      >
+      <template v-for="item in items" :key="item.key">
+        <div v-if="item.divide" class="rail-divide"></div>
+        <button
+          class="nav-item"
+          :class="{ on: route.meta.nav === item.key }"
+          @click="go(item)"
+        >
         <!-- 概览 -->
         <svg v-if="item.key === 'lessons'" width="22" height="22" viewBox="0 0 24 24" fill="none">
           <rect x="3" y="3" width="7" height="7" rx="1.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
@@ -78,14 +82,20 @@ async function logout() {
           <path d="M4 17l4-5 3.5 3L18 8l2 2.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
           <line x1="4" y1="20.5" x2="20" y2="20.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" />
         </svg>
+        <!-- 运维 -->
+        <svg v-else-if="item.key === 'ops'" width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="3.2" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
+          <path d="M12 3.2v2.4M12 18.4v2.4M20.8 12h-2.4M5.6 12H3.2M18.2 5.8l-1.7 1.7M7.5 16.5l-1.7 1.7M18.2 18.2l-1.7-1.7M7.5 7.5L5.8 5.8" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" />
+        </svg>
         <!-- 知识库 -->
         <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none">
           <path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3V4z" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linejoin="round" />
           <path d="M5 16.5A2.5 2.5 0 017.5 14H19" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
           <line x1="9" y1="8" x2="15" y2="8" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" />
         </svg>
-        <span>{{ item.label }}</span>
-      </button>
+          <span>{{ item.label }}</span>
+        </button>
+      </template>
       <div class="flex1"></div>
       <button class="me" :title="auth.displayName + '（点击退出）'" @click="logout">
         {{ nameInitial(auth.displayName) }}
@@ -156,6 +166,13 @@ async function logout() {
 .nav-item.on span {
   font-weight: 600;
   color: #fff;
+}
+.rail-divide {
+  width: 34px;
+  height: 1px;
+  background: var(--line);
+  margin: 6px 0;
+  flex: none;
 }
 .flex1 {
   flex: 1;
