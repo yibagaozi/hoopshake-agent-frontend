@@ -56,8 +56,9 @@ router.beforeEach(async (to) => {
 
   const auth = useAuthStore();
 
-  // 未配置云端、或教师选了离线进入，都不拦登录：edge 接口本来就不校验身份
-  const needSignIn = auth.cloudReady && !auth.offline;
+  // 云端由本机 nginx 反代，恒可达；只有教师主动选了离线进入才不拦登录
+  // （edge 的 /local 接口本来就不校验身份）
+  const needSignIn = !auth.offline;
 
   if (!auth.signedIn && needSignIn) {
     await auth.restore();

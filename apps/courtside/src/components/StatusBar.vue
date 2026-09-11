@@ -60,7 +60,7 @@ const chips = computed(() => [
   {
     key: "cloud",
     label: "云同步",
-    tone: auth.signedIn ? "ok" : auth.cloudReady ? "warn" : "off",
+    tone: auth.signedIn ? "ok" : "warn",
     title: auth.signedIn ? "已登录云端" : "未登录云端",
   },
 ]);

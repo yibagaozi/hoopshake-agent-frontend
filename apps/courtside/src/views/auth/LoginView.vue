@@ -4,7 +4,6 @@ import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppLogo from "@/components/AppLogo.vue";
 import { useAuthStore } from "@/stores/auth.js";
-import { cloudBaseUrl, setCloudBaseUrl } from "@/api/cloud.js";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -15,24 +14,12 @@ const password = ref("");
 const remember = ref(true);
 const showPassword = ref(false);
 
-const editingCloud = ref(!cloudBaseUrl());
-const cloudUrl = ref(cloudBaseUrl());
-
 const canSubmit = computed(
   () => identifier.value.trim() && password.value && !auth.loading,
 );
 
-function saveCloud() {
-  setCloudBaseUrl(cloudUrl.value);
-  editingCloud.value = false;
-}
-
 async function submit() {
   if (!canSubmit.value) return;
-  if (!cloudBaseUrl()) {
-    editingCloud.value = true;
-    return;
-  }
   const ok = await auth.signIn(identifier.value.trim(), password.value, remember.value);
   if (ok) router.push(route.query.next || "/console/live");
 }
@@ -109,18 +96,6 @@ function skip() {
         <button class="submit" type="submit" :disabled="!canSubmit">
           {{ auth.loading ? "登录中…" : "登录" }}
         </button>
-
-        <!-- 云端地址：现场部署时按学校环境填一次 -->
-        <div class="cloud">
-          <template v-if="editingCloud">
-            <input v-model="cloudUrl" class="field small" placeholder="https://云端地址" />
-            <button type="button" class="mini" @click="saveCloud">保存</button>
-          </template>
-          <template v-else>
-            <span class="mono url">{{ cloudUrl || "未配置云端" }}</span>
-            <button type="button" class="mini" @click="editingCloud = true">修改</button>
-          </template>
-        </div>
 
         <div class="tail">
           还没有账号？<RouterLink to="/register">申请注册</RouterLink>
@@ -358,35 +333,9 @@ h2 {
   box-shadow: 0 8px 20px rgba(255, 106, 44, 0.28);
 }
 
-.cloud {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-}
 
-.field.small {
-  height: 42px;
-  font-size: 13px;
-  margin-bottom: 0;
-  border-radius: 11px;
-}
 
-.url {
-  flex: 1;
-  font-size: 12px;
-  color: var(--ink-6);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.mini {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--brand-deep);
-  flex: none;
-}
 
 .tail {
   text-align: center;

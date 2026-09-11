@@ -20,7 +20,6 @@ export const useAuthStore = defineStore("auth", () => {
 
   const signedIn = computed(() => !!accessToken.value);
   const displayName = computed(() => user.value?.displayName || user.value?.username || "");
-  const cloudReady = computed(() => !!cloud.cloudBaseUrl());
 
   function apply(data, remember) {
     accessToken.value = data.accessToken;
@@ -67,7 +66,7 @@ export const useAuthStore = defineStore("auth", () => {
 
     restoring = (async () => {
       const token = localStorage.getItem(LS_REFRESH);
-      if (!token || !cloudReady.value) return false;
+      if (!token) return false;
       try {
         apply(await cloud.refresh(token), true);
         return true;
@@ -110,7 +109,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   return {
     accessToken, user, lessons, loading, error, offline,
-    signedIn, displayName, cloudReady,
+    signedIn, displayName,
     signIn, signUp, restore, signOut, enterOffline, loadLessons,
   };
 });

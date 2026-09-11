@@ -18,7 +18,6 @@ const messages = ref([]) // { id, role, content, streaming?, tools?: [] }
 const input = ref('')
 const streaming = ref(false)
 const loadingMsgs = ref(false)
-const suggestions = ref([])
 const bodyEl = ref(null)
 
 let controller = null
@@ -74,7 +73,6 @@ async function loadMessages(sessionId) {
 async function selectSession(sessionId) {
   if (streaming.value) return
   currentId.value = sessionId
-  suggestions.value = []
   await loadMessages(sessionId)
 }
 
@@ -82,7 +80,6 @@ function newSession() {
   if (streaming.value) return
   currentId.value = null
   messages.value = []
-  suggestions.value = []
 }
 
 /** 会话在第一次发送时才建，空手点「新建对话」不会留下垃圾会话 */
@@ -98,7 +95,6 @@ async function send(text) {
   const content = (text ?? input.value).trim()
   if (!content || streaming.value) return
   input.value = ''
-  suggestions.value = []
 
   messages.value.push({ id: `u-${Date.now()}`, role: 'USER', content })
   const draft = { id: `a-${Date.now()}`, role: 'ASSISTANT', content: '', streaming: true, tools: [] }
@@ -133,8 +129,9 @@ async function send(text) {
             draft.content += data?.text || ''
             scrollBottom()
           } else if (event === 'done') {
+            // done 里也带 suggestions，但运维助手恒为空数组：它是只读诊断助手，
+            // 不生成追问建议。所以这里不接，界面上也没有那行按钮。
             draft.streaming = false
-            suggestions.value = data?.suggestions || []
           } else if (event === 'error') {
             draft.streaming = false
             draft.error = true
@@ -254,10 +251,6 @@ onBeforeUnmount(() => controller?.abort())
           </template>
 
           <div v-if="loadingMsgs" class="th-empty">加载对话中…</div>
-        </div>
-
-        <div v-if="suggestions.length" class="sugg-row">
-          <button v-for="s in suggestions" :key="s" class="sugg" @click="send(s)">{{ s }}</button>
         </div>
 
         <div class="conv-input">
@@ -529,28 +522,6 @@ onBeforeUnmount(() => controller?.abort())
 .tool-dot {
   color: var(--ok);
   font-weight: 700;
-}
-.sugg-row {
-  flex: none;
-  display: flex;
-  gap: 8px;
-  margin: 0 30px 12px;
-  overflow-x: auto;
-}
-.sugg {
-  flex: none;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-2);
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  padding: 9px 15px;
-  white-space: nowrap;
-}
-.sugg:hover {
-  border-color: var(--brand);
-  color: var(--brand-deep);
 }
 .conv-input {
   flex: none;
