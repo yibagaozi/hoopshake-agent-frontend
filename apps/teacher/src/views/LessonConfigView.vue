@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import {
   actionLabel,
   checkpointLabel,
+  hasCheckpointLabel,
   errText,
   isSafetyCheckpoint,
+  metaApi,
   fromLocalInput,
   isCode,
   lessonApi,
@@ -33,11 +35,50 @@ const customAction = ref('')
 const customCheckpoint = ref('')
 
 const ACTION_PRESETS = ['jump_shot', 'layup', 'free_throw', 'dribble', 'pass']
-const CHECKPOINT_PRESETS = ['elbow_alignment', 'release_timing', 'knee_valgus', 'follow_through', 'jump_balance']
+/**
+ * 检查点候选。
+ *
+ * 这里曾经写死过五个 id，那是项目早期没有真实词表时先占位的，
+ * 和场边规则引擎（checkpoints.yaml）、云端实际存的 id 都对不上 ——
+ * 老师把它们打开也不会有任何提示产生，还看不出为什么。所以不再臆造候选项。
+ *
+ * 现在的来源，按优先级：
+ *   1. GET /api/meta/vocabulary —— 权威词表，开放后自动生效，前端不用改
+ *   2. 本课已保存的 enabledCheckpoints —— 后端实际在用的 id
+ *   3. 下面的自定义输入框 —— 手动补
+ */
+const vocabulary = ref(null)
+
+async function loadVocabulary() {
+  try {
+    const v = await metaApi.vocabulary()
+    if (Array.isArray(v?.checkpoints) && v.checkpoints.length) vocabulary.value = v.checkpoints
+  } catch {
+    // 接口未开放（404 / 50100），退回本课已有 + 本地兜底中文名
+  }
+}
+
+/** 词表里的中文名优先，其次本地兜底表 */
+function cpLabel(id) {
+  const hit = vocabulary.value?.find((c) => c.id === id)
+  return hit?.label || checkpointLabel(id)
+}
+
+/** 有没有中文名可显示；没有就只能把 id 原样摆出来 */
+function cpNamed(id) {
+  return !!vocabulary.value?.find((c) => c.id === id)?.label || hasCheckpointLabel(id)
+}
+
+function cpSafety(id) {
+  const hit = vocabulary.value?.find((c) => c.id === id)
+  return typeof hit?.safety === 'boolean' ? hit.safety : isSafetyCheckpoint(id)
+}
 
 const editable = computed(() => lesson.value?.status === 'PLANNED')
 const actionOptions = computed(() => [...new Set([...ACTION_PRESETS, ...form.value.actionTypes])])
-const checkpointOptions = computed(() => [...new Set([...CHECKPOINT_PRESETS, ...form.value.enabledCheckpoints])])
+const checkpointOptions = computed(() => [
+  ...new Set([...(vocabulary.value || []).map((c) => c.id), ...form.value.enabledCheckpoints]),
+])
 
 function toggleAction(a) {
   if (!editable.value) return
@@ -119,7 +160,10 @@ async function save() {
     saving.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  loadVocabulary()
+})
 </script>
 
 <template>
@@ -209,9 +253,15 @@ onMounted(load)
           <div class="panel soft" style="overflow: hidden">
             <div v-for="c in checkpointOptions" :key="c" class="cp-row">
               <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                <span class="cp-name">{{ checkpointLabel(c) }}</span>
-                <span class="cp-id">{{ c }}</span>
-                <span v-if="isSafetyCheckpoint(c)" class="safety-tag">安全</span>
+                <template v-if="cpNamed(c)">
+                  <span class="cp-name">{{ cpLabel(c) }}</span>
+                  <span class="cp-id">{{ c }}</span>
+                </template>
+                <template v-else>
+                  <span class="cp-id plain">{{ c }}</span>
+                  <span class="unnamed-tag" title="词表里没有登记这个 ID 的中文名">未登记</span>
+                </template>
+                <span v-if="cpSafety(c)" class="safety-tag">安全</span>
               </div>
               <button
                 class="switch"
@@ -229,7 +279,15 @@ onMounted(load)
             <button class="btn sm" @click="addCheckpoint">添加</button>
           </div>
           <div class="hint-row">
-            <span class="i">i</span>检查点 ID 与场边算法、知识库共用同一词表（词表接口未开放，需与后端约定一致）
+            <span class="i">i</span>
+            <span>
+              这些 ID 会原样下发给场边规则引擎与知识库，三边必须用同一套命名；写错不会报错，只是永远不触发。
+              <template v-if="!vocabulary">
+                词表接口（<code>/api/meta/vocabulary</code>）尚未开放，所以候选项只列本课已有的；
+                标「未登记」的是前端没有它的中文名，不影响使用。
+              </template>
+              <template v-else>中文名来自词表接口。</template>
+            </span>
           </div>
         </div>
       </div>
@@ -314,6 +372,24 @@ onMounted(load)
   background: var(--fill-2);
   border-radius: 6px;
   padding: 3px 7px;
+}
+.cp-id.plain {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.unnamed-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray);
+  background: var(--fill-2);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.hint-row code {
+  font: 500 11px/1 var(--mono);
+  background: var(--fill-2);
+  border-radius: 5px;
+  padding: 2px 5px;
 }
 .safety-tag {
   font-size: 11px;

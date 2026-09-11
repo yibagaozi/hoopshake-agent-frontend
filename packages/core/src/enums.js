@@ -111,6 +111,11 @@ export const CHECKPOINT_LABELS = {
   'safety.trunk_lean': '躯干后仰',
   'safety.layup_landing_knee': '落地屈膝缓冲',
 
+  // 云端课程配置里见到的 id，和上面两套又不是一套。中文名照 checkpoints.yaml
+  // 里同义项的叫法，若贵方另有习惯叫法以那个为准
+  release_elbow_extension: '出手肘伸展',
+  release_knee_symmetry: '出手膝对称',
+
   elbow_alignment: '肘部对齐',
   elbow_under_ball: '肘在球下',
   elbow_flare: '肘部外翻',
@@ -133,6 +138,12 @@ export const CHECKPOINT_LABELS = {
 export function checkpointLabel(id) {
   if (!id) return '—'
   return CHECKPOINT_LABELS[id] || CHECKPOINT_LABELS[String(id).toLowerCase()] || id
+}
+
+/** 本地表里有没有登记这个 id。界面靠它区分「有中文名」和「只能原样显示 id」 */
+export function hasCheckpointLabel(id) {
+  if (!id) return false
+  return !!(CHECKPOINT_LABELS[id] || CHECKPOINT_LABELS[String(id).toLowerCase()])
 }
 
 /** 安全类检查点（触发时按安全提醒处理） */
