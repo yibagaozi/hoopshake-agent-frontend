@@ -42,7 +42,15 @@ const checkpointBars = computed(() => {
   const map = new Map()
   for (const f of feedback.value) {
     if (!f.checkpointId) continue
-    const item = map.get(f.checkpointId) || { id: f.checkpointId, total: 0, major: 0, minor: 0 }
+    const item = map.get(f.checkpointId) || {
+      id: f.checkpointId,
+      // 反馈流带了 checkpointLabel 就用它，和场边规则引擎下发的是同一个名字
+      label: f.checkpointLabel || '',
+      total: 0,
+      major: 0,
+      minor: 0,
+    }
+    if (!item.label && f.checkpointLabel) item.label = f.checkpointLabel
     item.total++
     if (f.severity === 'MAJOR') item.major++
     else if (f.severity === 'MINOR') item.minor++
@@ -62,7 +70,7 @@ const checkpointBars = computed(() => {
         tone = 'mid'
         verdict = '稳定'
       }
-      return { ...c, label: checkpointLabel(c.id), score, tone, verdict }
+      return { ...c, label: c.label || checkpointLabel(c.id), score, tone, verdict }
     })
     .sort((a, b) => b.penalty - a.penalty || b.total - a.total)
     .slice(0, 6)

@@ -37,12 +37,21 @@ export function initial(name) {
 }
 
 /* ---------- 词表 ----------
-   动作与检查点的中文/英文名来自 @hoopshake/core，与云端（学生端/教师端）共用同一份，
-   避免同一个 id 在两端显示成不同名字。新增条目请改 packages/core/src/enums.js。 */
+   中文名的**第一来源是 edge**：cue 带 checkpointLabel、actionFocus 带 actionLabel，
+   那是规则引擎按 checkpoints.yaml 直接下发的，和现场算法配置永远一致。
+   @hoopshake/core 里的映射表只做兜底 —— 字段缺失时才用，顺带保证同一个 id
+   在场边和云端（学生端/教师端）显示成同一个名字。
+   新增兜底条目请改 packages/core/src/enums.js。 */
 
 export const actionCn = actionLabel;
 export const actionEn = actionLabelEn;
 export const checkpointCn = checkpointLabel;
+
+/** 检查点名：后端给了就用后端的，没给才查本地表 */
+export const cpName = (label, id) => label || checkpointLabel(id);
+
+/** 动作名：同上 */
+export const actName = (label, type) => label || actionLabel(type);
 
 /** 会话状态 → 中文 */
 const SESSIONS = {

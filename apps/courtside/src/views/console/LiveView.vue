@@ -9,7 +9,7 @@ import { DISPLAY_VIEWS } from "@/stores/screen.js";
 import * as edgeApi from "@/api/edge.js";
 import { ALLOW_NO_LESSON } from "@/config/features.js";
 import {
-  actionCn, actionEn, checkpointCn, clock, initial, shortClock,
+  actName, actionEn, clock, cpName, initial, shortClock,
 } from "@/utils/format.js";
 
 const edge = useEdgeStore();
@@ -95,7 +95,7 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
           </div>
           <div class="action" :class="{ idle: !focus?.actionType }">
             <template v-if="focus?.actionType">
-              {{ actionCn(focus.actionType) }}
+              {{ actName(focus.actionLabel, focus.actionType) }}
               <span class="action-en">{{ actionEn(focus.actionType) }}</span>
             </template>
             <template v-else>等待识别</template>
@@ -115,7 +115,7 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
       <div v-if="latestCue" class="cue-hero">
         <div class="bang">!</div>
         <div>
-          <div class="cue-cp">检查点 · {{ checkpointCn(latestCue.checkpointId) }}</div>
+          <div class="cue-cp">检查点 · {{ cpName(latestCue.checkpointLabel, latestCue.checkpointId) }}</div>
           <div class="cue-text">{{ latestCue.cueText }}</div>
         </div>
       </div>
@@ -132,7 +132,7 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
           <span class="dot" :class="c.severity === 'POSITIVE' ? 'ok' : 'brand'" />
           <span class="mono time">{{ classClock(c.occurredAt) }}</span>
           <span class="who">{{ c.displayName }}</span>
-          <span class="what">{{ checkpointCn(c.checkpointId) }}</span>
+          <span class="what">{{ cpName(c.checkpointLabel, c.checkpointId) }}</span>
         </div>
         <div v-if="!recentCues.length" class="cue-chip muted">等待 CV 事件…</div>
       </div>

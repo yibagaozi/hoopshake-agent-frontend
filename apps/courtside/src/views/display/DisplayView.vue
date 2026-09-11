@@ -8,7 +8,7 @@ import AppLogo from "@/components/AppLogo.vue";
 import { useEdgeStore } from "@/stores/edge.js";
 import { useScreenStore } from "@/stores/screen.js";
 import {
-  actionCn, actionEn, checkpointCn, clock, initial, shortClock,
+  actName, actionEn, clock, cpName, initial, shortClock,
 } from "@/utils/format.js";
 
 const BOARD_W = 1280;
@@ -158,7 +158,7 @@ const brief = computed(() => ({
               <div class="cap">{{ screen.view === "focus" ? "单人聚焦" : "当前动作" }}</div>
               <div class="action" :class="{ idle: !focus?.actionType }">
                 <template v-if="focus?.actionType">
-                  {{ actionCn(focus.actionType) }}
+                  {{ actName(focus.actionLabel, focus.actionType) }}
                   <span class="en">{{ actionEn(focus.actionType) }}</span>
                 </template>
                 <template v-else>等待识别</template>
@@ -180,7 +180,7 @@ const brief = computed(() => ({
           <div v-if="latestCue" class="hero">
             <div class="bang">!</div>
             <div>
-              <div class="h-cap">检查点 · {{ checkpointCn(latestCue.checkpointId) }}</div>
+              <div class="h-cap">检查点 · {{ cpName(latestCue.checkpointLabel, latestCue.checkpointId) }}</div>
               <div class="h-text">{{ latestCue.cueText }}</div>
             </div>
           </div>
@@ -200,7 +200,7 @@ const brief = computed(() => ({
               <span class="dot" :class="c.severity === 'POSITIVE' ? 'ok' : 'brand'" />
               <span class="mono t">{{ classClock(c.occurredAt) }}</span>
               <span class="n">{{ c.displayName }}</span>
-              <span class="w">{{ checkpointCn(c.checkpointId) }}</span>
+              <span class="w">{{ cpName(c.checkpointLabel, c.checkpointId) }}</span>
             </div>
             <div v-if="!edge.cues.length" class="cue empty">暂无提示</div>
           </div>

@@ -97,6 +97,20 @@ export function actionLabel(id) {
 export const CHECKPOINT_LABELS = {
   // 注意：这里是「检查点」名称（检查什么），不是违规现象本身。
   // 例如 elbow_alignment 是「肘部对齐」，其违规表现才叫「肘部外翻」(elbow_flare)。
+  //
+  // 这份表只是**兜底**：实时通道（edge 的 cue/safetyAlert）与云端反馈流都会
+  // 带 checkpointLabel，优先用后端给的那个，这里只在字段缺失时顶上。
+  // 下面 ft./js./lu./safety. 开头的 id 来自 edge 的 checkpoints.yaml，
+  // 点号命名，和早期这套下划线命名不是一套，别混用。
+  'ft.load.knee': '蓄力屈膝',
+  'ft.release.elbow': '出手肘伸展',
+  'ft.release.height': '出手高度',
+  'ft.follow.elbow': '跟随伸展',
+  'js.release.elbow': '跳投出手肘',
+  'lu.finish.elbow': '上篮终结伸展',
+  'safety.trunk_lean': '躯干后仰',
+  'safety.layup_landing_knee': '落地屈膝缓冲',
+
   elbow_alignment: '肘部对齐',
   elbow_under_ball: '肘在球下',
   elbow_flare: '肘部外翻',
@@ -122,9 +136,14 @@ export function checkpointLabel(id) {
 }
 
 /** 安全类检查点（触发时按安全提醒处理） */
+/** 早期下划线命名里的安全项；点号命名的一律靠 safety. 前缀识别 */
 const SAFETY_CHECKPOINTS = new Set(['knee_valgus', 'landing_buffer'])
 
 export function isSafetyCheckpoint(id) {
   if (!id) return false
-  return SAFETY_CHECKPOINTS.has(String(id).toLowerCase()) || /knee|valgus|land|safety|ankle/i.test(id)
+  const s = String(id).toLowerCase()
+  // edge 的 checkpoints.yaml 用 safety. 前缀显式标注安全项。
+  // 这里不再按关键词模糊匹配 —— 那会把 ft.load.knee（蓄力屈膝，普通 MINOR 项）
+  // 也当成安全告警，误标比漏标更糟。
+  return s.startsWith('safety.') || SAFETY_CHECKPOINTS.has(s)
 }
