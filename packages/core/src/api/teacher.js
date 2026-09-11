@@ -40,7 +40,10 @@ export const summaryApi = {
   exportSession: (sessionId) => http.post(`/api/teacher/summary/sessions/${sessionId}/export`),
 }
 
-/** §3.5 求助处理 /api/teacher/help-requests */
+/**
+ * 求助处理 /api/teacher/help-requests · TEACHER
+ * 列表只返回本教师名下学生的工单；status 可空 = 全部。
+ */
 export const teacherHelpApi = {
   list: ({ status, page = 0, size = 20 } = {}) =>
     http.get('/api/teacher/help-requests', { status, page, size }),

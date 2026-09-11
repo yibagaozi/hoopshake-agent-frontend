@@ -127,10 +127,10 @@ onBeforeUnmount(() => clearInterval(timer))
           <div v-if="!grafanaUrl && !editingGrafana" class="graf-empty">
             <div class="ge-t">尚未接入 Grafana</div>
             <div class="ge-s">
-              趋势数据在 <code>/actuator/prometheus</code>，指标名
+              后端只暴露数据源 <code>/actuator/prometheus</code> 供 Grafana 采集，指标名
               <code>hoopshake.llm.circuit.state</code>、<code>hoopshake.llm.stream.*</code>、
               <code>hoopshake.ask.ratelimit.*</code>。<br />
-              填入一个 Grafana 面板的嵌入地址即可在这里直接看。
+              面板建在自己的 Grafana 上，把嵌入地址填进来即可在这里直接看。
             </div>
             <button class="btn primary" @click="grafanaDraft = grafanaUrl; editingGrafana = true">
               填写面板地址
@@ -143,8 +143,11 @@ onBeforeUnmount(() => clearInterval(timer))
               <input v-model="grafanaDraft" class="txt" placeholder="https://grafana.example.com/d-solo/xxx?panelId=1&kiosk" />
             </div>
             <div class="ge-s" style="margin: 10px 0 14px">
-              只存在本机浏览器里，不进构建产物。面板需允许被本站内嵌
-              （Grafana 侧放开 <code>allow_embedding</code> 与 <code>X-Frame-Options</code>）。
+              只存在本机浏览器里，不进构建产物。后端不参与，这一段纯前端嵌入。<br />
+              Grafana 侧要放开三项，缺一面板就会白屏或反复要求登录：
+              <code>allow_embedding = true</code>、
+              <code>security.cookie_samesite = none</code>（新版必需，否则跨站 cookie 丢）、
+              以及别用 <code>X-Frame-Options: DENY</code> 挡掉本站。
             </div>
             <div style="display: flex; gap: 10px">
               <button class="btn" @click="editingGrafana = false">取消</button>

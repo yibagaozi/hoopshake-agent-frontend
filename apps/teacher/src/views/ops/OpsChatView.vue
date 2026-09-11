@@ -140,7 +140,7 @@ async function send(text) {
             draft.error = true
             toast.err(data?.message || data?.error || 'AI 回复失败')
           }
-          // rag / assist：运维台不展示，忽略
+          // 运维诊断不挂 RAG、不做求助建议，所以事件只有 meta/delta/tool/done/error
         },
       }
     )

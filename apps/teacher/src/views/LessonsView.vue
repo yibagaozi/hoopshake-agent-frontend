@@ -25,23 +25,21 @@ const lessons = ref([])
 const filter = ref('ALL')
 const keyword = ref('')
 
-/**
- * 学生求助收件箱。
- * 文档（cloud-frontend-api §3.5）只给了 POST /{requestId}/handle，
- * 没写教师侧的列表端点，这里按同一前缀试 GET /api/teacher/help-requests。
- * 取不到就整块不显示 —— 宁可少一个入口，也不要在概览页挂一个常红的报错。
- */
+/** 学生求助收件箱（/api/teacher/help-requests，只返回本教师名下学生的工单） */
 const helpRequests = ref([])
-const helpAvailable = ref(false)
 const handling = ref(null)
+
+/** 已办结的状态名。status 枚举后端还没给，先按常见几种认，认不出就当未处理显示 */
+const DONE_STATUS = new Set(['HANDLED', 'RESOLVED', 'CLOSED', 'DONE', 'REPLIED'])
 
 async function loadHelpRequests() {
   try {
-    const list = pageItems(await teacherHelpApi.list({ status: 'PENDING', size: 20 }))
-    helpRequests.value = list
-    helpAvailable.value = true
-  } catch {
-    helpAvailable.value = false
+    // 不传 status（= 全部）。待处理的枚举名还没确认，传错值会静默返回空列表，
+    // 那比多显示几条已办的更难发现，所以筛选放到前端做
+    const list = pageItems(await teacherHelpApi.list({ size: 20 }))
+    helpRequests.value = list.filter((r) => !r.status || !DONE_STATUS.has(String(r.status).toUpperCase()))
+  } catch (err) {
+    toast.err(errText(err, '加载学生求助失败'))
   }
 }
 
@@ -50,7 +48,9 @@ async function handleHelp(r) {
   if (reply === null) return
   handling.value = r.requestId
   try {
-    await teacherHelpApi.handle(r.requestId, { reply: reply.trim(), status: 'HANDLED' })
+    // 只发 reply：handle 端点的请求体后端还没给字段表，多塞一个猜的 status
+    // 可能被参数校验挡掉（40000），少发比多发安全
+    await teacherHelpApi.handle(r.requestId, { reply: reply.trim() })
     helpRequests.value = helpRequests.value.filter((x) => x.requestId !== r.requestId)
     toast.ok('已回复')
   } catch (err) {
@@ -199,7 +199,7 @@ onMounted(() => {
 
     <div class="content">
       <!-- 学生求助（§3.5），接口不可用时整块不渲染 -->
-      <div v-if="helpAvailable && helpRequests.length" class="panel help-box">
+      <div v-if="helpRequests.length" class="panel help-box">
         <div class="help-head">
           <span class="help-badge">{{ helpRequests.length }}</span>
           学生求助待处理

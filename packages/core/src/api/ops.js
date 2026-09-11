@@ -21,7 +21,9 @@ export const opsApi = {
 
 /**
  * 运维诊断对话 /api/ops/chat · ADMIN · SSE
- * 路径与事件同学生对话对称（无 interrupt）。只读诊断助手：给建议、不执行动作。
+ * 路径与学生对话对称，但没有 interrupt。只读诊断助手：给建议、不执行动作。
+ * 事件比学生对话少两个：只有 meta/delta/tool/done/error —— 运维诊断不挂 RAG、
+ * 不做求助建议，所以没有 rag/assist。
  * 依赖 agent 开关 + GLM key，未启用返回 50310。
  */
 export const opsChatApi = {
