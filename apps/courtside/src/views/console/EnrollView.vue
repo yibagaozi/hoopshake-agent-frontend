@@ -1,49 +1,111 @@
 <script setup>
-// 教师操作台 · 现场注册。输学号 → 匹配 → 采集 5 帧建档 → 重拉名单。
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { edgeErrText } from "@/api/http.js";
-import { useRoute } from "vue-router";
+// 教师操作台 · 现场注册。整班一次采集（edge 托管），跑完看脸绑学号。
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { edgeErrText, edgeErrorName } from "@/api/http.js";
 import EnrollSkeleton from "@/components/EnrollSkeleton.vue";
 import { useEdgeStore } from "@/stores/edge.js";
 import * as edgeApi from "@/api/edge.js";
-import { enrollCn, initial } from "@/utils/format.js";
+import { shortClock } from "@/utils/format.js";
 
 const edge = useEdgeStore();
-const route = useRoute();
 
-const studentNo = ref("");
-const matched = ref(null);
-/** notFound / error / null */
-const problem = ref(null);
+/**
+ * session 全程用同一个值：**当前课程 id**。
+ * start / status / identities / thumbnail 四个接口都要它，值不一致就互相看不见
+ * —— identities 拿不到数据多半就是这里对不上。
+ */
+const session = computed(() => edge.lesson?.lessonId || "");
+
+const camera = computed(() => edge.anchorCamera);
+const cameraLabel = computed(() => camera.value?.role || camera.value?.camId || "主机位");
+const cameraOnline = computed(() => !!(camera.value?.online && camera.value?.signal));
+
+/* ---------------- 采集 ---------------- */
+
+const opts = ref({ seconds: 45, expectedPersons: null });
+const starting = ref(false);
+/** NONE / RUNNING / SUCCEEDED / FAILED */
+const runState = ref("NONE");
+const runMsg = ref("");
+const startedAt = ref(null);
 const problemText = ref("");
-const matching = ref(false);
+const now = ref(Date.now());
 
-const task = ref(null);
-const progress = ref(null);
 let poller = null;
+let ticker = null;
 
-const TOTAL_FRAMES = 5;
+const running = computed(() => runState.value === "RUNNING");
+const elapsed = computed(() => {
+  void now.value;
+  return startedAt.value ? (Date.now() - Date.parse(startedAt.value)) / 1000 : 0;
+});
+
+function applyStatus(st) {
+  runState.value = st?.state || "NONE";
+  runMsg.value = st?.message || "";
+  if (st?.startedAt) startedAt.value = st.startedAt;
+}
+
+async function refreshStatus() {
+  if (!session.value) return;
+  try {
+    applyStatus(await edgeApi.getEnrollStatus(session.value));
+  } catch {
+    // 没跑过时后端可能直接 404，当作 NONE
+    runState.value = "NONE";
+  }
+}
+
+/** 采集进度不走 WS，只能轮询；2.5s 一次，到终态就停 */
+function watchRun() {
+  clearInterval(poller);
+  poller = setInterval(async () => {
+    await refreshStatus();
+    if (!running.value) {
+      clearInterval(poller);
+      if (runState.value === "SUCCEEDED") await loadIdentities();
+    }
+  }, 2500);
+}
+
+async function startCapture() {
+  if (!session.value || starting.value) return;
+  starting.value = true;
+  problemText.value = "";
+  try {
+    applyStatus(
+      await edgeApi.startEnroll(session.value, {
+        enrollCamera: camera.value?.camId,
+        seconds: Number(opts.value.seconds) || undefined,
+        expectedPersons: Number(opts.value.expectedPersons) || undefined,
+      }),
+    );
+    startedAt.value = startedAt.value || new Date().toISOString();
+    watchRun();
+  } catch (e) {
+    const name = edgeErrorName(e);
+    // 这三种是操作员当场能处理的，给具体的下一步而不是通用报错
+    if (name === "ENROLL_BUSY") problemText.value = "已经有一轮采集在跑，等它结束再开始";
+    else if (name === "ENROLL_UNAVAILABLE") problemText.value = "这台场边主机没配采集编排，请联系运维";
+    else problemText.value = edgeErrText(e, "启动采集失败");
+  } finally {
+    starting.value = false;
+  }
+}
 
 /* ---------------- 看脸绑学号 ---------------- */
 
-/** bind = 看脸绑学号（算法已注册的人）；capture = 按学号现场采集建档 */
-const mode = ref("bind");
-
 const identities = ref([]);
-const enrollSession = ref("");
 const enrollCamera = ref("");
 const loadingIdentities = ref(false);
 /** localId → 输入框里的学号 */
 const noInput = ref({});
-/** localId → 绑定结果 { studentNo, displayName, matchedInRoster } */
+/** localId → 绑定结果 */
 const bindResult = ref({});
 const binding = ref(false);
 const bindings = ref([]);
 
-/**
- * 待绑列表 = 算法注册结果 ∪ 课中 WS 推来的 enrollNeeded。
- * 后者可能压根没注册过（enroll_preview 里没缩略图），只能按 stu_XX 绑。
- */
+/** 待绑 = 算法注册结果 ∪ 课中 WS 推来的 enrollNeeded */
 const bindRows = computed(() => {
   const byId = new Map();
   for (const p of identities.value) {
@@ -51,7 +113,6 @@ const bindRows = computed(() => {
       localId: p.localId,
       globalId: p.globalId,
       hasThumbnail: !!p.hasThumbnail,
-      session: enrollSession.value,
       live: false,
     });
   }
@@ -61,11 +122,9 @@ const bindRows = computed(() => {
       localId: p.studentLocalId,
       globalId: p.globalId ?? prev?.globalId,
       hasThumbnail: prev?.hasThumbnail ?? !!p.hasThumbnail,
-      session: prev?.session ?? p.session ?? enrollSession.value,
       // 课中推来的标出来，老师知道这人正在场上投篮
       live: !prev || !!p.actionType,
       actionType: p.actionType,
-      occurredAt: p.occurredAt,
     });
   }
   return [...byId.values()].filter((r) => !bindResult.value[r.localId]);
@@ -75,21 +134,21 @@ const pendingCount = computed(
   () => bindRows.value.filter((r) => /^\d{10}$/.test((noInput.value[r.localId] || "").trim())).length,
 );
 
-function thumbUrl(row) {
-  return edgeApi.enrollThumbnailUrl(row.session, row.localId);
-}
+const thumbUrl = (row) => edgeApi.enrollThumbnailUrl(session.value, row.localId);
 
 async function loadIdentities() {
+  if (!session.value) return;
   loadingIdentities.value = true;
+  problemText.value = "";
   try {
-    const res = await edgeApi.getEnrollIdentities();
-    enrollSession.value = res?.session || "";
+    const res = await edgeApi.getEnrollIdentities(session.value);
     enrollCamera.value = res?.enrollCamera || "";
     identities.value = res?.people || [];
-    edge.mergePendingBinds(identities.value, enrollSession.value);
+    edge.mergePendingBinds(identities.value, session.value);
   } catch (e) {
-    problem.value = "error";
-    problemText.value = edgeErrText(e, "拉取注册结果失败");
+    // NOT_FOUND = 这个 session 没有注册产物，采集没成功或没跑过，不当错误刷屏
+    if (edgeErrorName(e) !== "NOT_FOUND") problemText.value = edgeErrText(e, "拉取注册结果失败");
+    identities.value = [];
   } finally {
     loadingIdentities.value = false;
   }
@@ -98,7 +157,10 @@ async function loadIdentities() {
 async function loadBindings() {
   try {
     const res = await edgeApi.getEnrollBindings();
-    bindings.value = Array.isArray(res) ? res : res?.bindings || [];
+    // 回来的是 globalId → {studentNo,studentId,displayName} 的 map，不是数组
+    bindings.value = Array.isArray(res)
+      ? res
+      : Object.entries(res || {}).map(([globalId, v]) => ({ globalId, ...v }));
   } catch {
     // 没有已绑记录时不打扰
   }
@@ -108,14 +170,14 @@ async function submitBind() {
   const payload = bindRows.value
     .map((r) => ({
       localId: r.localId,
-      globalId: r.globalId,
+      ...(r.globalId ? { globalId: r.globalId } : {}),
       studentNo: (noInput.value[r.localId] || "").trim(),
     }))
     .filter((b) => /^\d{10}$/.test(b.studentNo));
   if (!payload.length) return;
 
   binding.value = true;
-  problem.value = null;
+  problemText.value = "";
   try {
     const res = await edgeApi.bindEnroll(payload);
     for (const r of Array.isArray(res) ? res : []) {
@@ -124,334 +186,194 @@ async function submitBind() {
       delete noInput.value[r.localId];
     }
     await loadBindings();
-    // 绑完名单里的人脸状态会变，顺手刷一次
     if (edge.lesson?.lessonId) await edge.refreshRoster();
   } catch (e) {
-    problem.value = "error";
-    problemText.value = edgeErrText(e, "绑定失败");
+    problemText.value =
+      edgeErrorName(e) === "ROSTER_NOT_LOADED"
+        ? "还没拉参课名单，先到「名单」页同步一次再绑"
+        : edgeErrText(e, "绑定失败");
   } finally {
     binding.value = false;
   }
 }
 
-/** 绑定结果里 matchedInRoster=false 的，单独提出来提醒 */
+/** 绑定结果里学号不在名单的，单独提出来提醒 */
 const offRoster = computed(() =>
   Object.values(bindResult.value).filter((r) => r.matchedInRoster === false),
 );
 
-const valid = computed(() => /^\d{10}$/.test(studentNo.value));
-const capturing = computed(() =>
-  ["PENDING", "CAPTURING", "UPLOADING", "REGISTERING"].includes(progress.value?.status),
-);
-const done = computed(() => progress.value?.status === "REGISTERED");
+/* ---------------- 步骤 ---------------- */
 
-const captured = computed(() => progress.value?.capturedFrames ?? 0);
-const totalFrames = computed(() => progress.value?.totalFrames ?? TOTAL_FRAMES);
-
-const camera = computed(() => edge.anchorCamera);
-const cameraLabel = computed(() => camera.value?.role || camera.value?.camId || "主机位");
-const cameraOnline = computed(() => !!(camera.value?.online && camera.value?.signal));
-
-/** 名单里带过来的学号自动填入 */
-onMounted(() => {
-  const q = route.query.studentNo;
-  if (typeof q === "string" && /^\d{10}$/.test(q)) {
-    studentNo.value = q;
-    match();
-  }
+const step = computed(() => {
+  if (running.value) return 2;
+  if (bindRows.value.length || identities.value.length) return 3;
+  return 1;
 });
 
-onMounted(() => {
-  loadIdentities();
+onMounted(async () => {
+  await refreshStatus();
+  if (running.value) watchRun();
+  else if (runState.value === "SUCCEEDED") await loadIdentities();
   loadBindings();
+  ticker = setInterval(() => (now.value = Date.now()), 1000);
 });
 
-onUnmounted(() => clearInterval(poller));
-
-watch(studentNo, () => {
-  problem.value = null;
-  if (!capturing.value) matched.value = null;
+onUnmounted(() => {
+  clearInterval(poller);
+  clearInterval(ticker);
 });
-
-async function match() {
-  if (!valid.value) {
-    problem.value = "error";
-    problemText.value = "学号须为 10 位数字";
-    return;
-  }
-  matching.value = true;
-  problem.value = null;
-  matched.value = null;
-  try {
-    const res = await edgeApi.matchStudent(studentNo.value);
-    if (res?.matched) {
-      matched.value = res.student;
-    } else {
-      problem.value = "notFound";
-    }
-  } catch (e) {
-    problem.value = "error";
-    problemText.value = edgeErrText(e);
-  } finally {
-    matching.value = false;
-  }
-}
-
-async function startCapture() {
-  if (!matched.value) return;
-  problem.value = null;
-  try {
-    task.value = await edgeApi.startEnroll({
-      studentNo: matched.value.studentNo,
-      frames: TOTAL_FRAMES,
-      camId: camera.value?.camId,
-    });
-    progress.value = {
-      status: task.value.status,
-      capturedFrames: 0,
-      totalFrames: task.value.frames ?? TOTAL_FRAMES,
-    };
-    watchProgress();
-  } catch (e) {
-    problem.value = "error";
-    problemText.value = edgeErrText(e);
-  }
-}
-
-/** 注册进度只推给 /ws/registration，操作台这边用轮询 */
-function watchProgress() {
-  clearInterval(poller);
-  poller = setInterval(async () => {
-    if (!task.value?.taskId) return;
-    try {
-      const p = await edgeApi.getEnrollProgress(task.value.taskId);
-      progress.value = p;
-      if (["REGISTERED", "FAILED", "CANCELLED"].includes(p.status)) {
-        clearInterval(poller);
-        if (p.status === "REGISTERED" && edge.lesson?.lessonId) {
-          // 建档完成后重拉名单，待注册数即时下降
-          await edgeApi.syncRoster(edge.lesson.lessonId);
-          await edge.refreshRoster();
-        }
-        if (p.status === "FAILED") {
-          problem.value = "error";
-          problemText.value = p.failReason || "采集失败";
-        }
-      }
-    } catch (e) {
-      clearInterval(poller);
-      problem.value = "error";
-      problemText.value = edgeErrText(e);
-    }
-  }, 800);
-}
-
-function reset() {
-  clearInterval(poller);
-  task.value = null;
-  progress.value = null;
-  matched.value = null;
-  problem.value = null;
-  studentNo.value = "";
-}
 </script>
 
 <template>
   <div class="wrap">
-    <!-- 两种注册路径：课前看脸绑、现场按学号采集 -->
-    <div class="modes">
-      <button class="mode" :class="{ on: mode === 'bind' }" @click="mode = 'bind'">
-        看脸绑学号
-        <span v-if="bindRows.length" class="cnt">{{ bindRows.length }}</span>
-      </button>
-      <button class="mode" :class="{ on: mode === 'capture' }" @click="mode = 'capture'">
-        按学号采集
-      </button>
+    <div class="step-row">
+      <span class="step" :class="{ on: step === 1, done: step > 1 }"><span class="n">1</span>采集</span>
+      <span class="step" :class="{ on: step === 2, done: step > 2 }"><span class="n">2</span>等待算法</span>
+      <span class="step" :class="{ on: step === 3 }"><span class="n">3</span>看脸绑学号</span>
     </div>
 
-  <div v-if="mode === 'bind'" class="bind-page">
-    <div class="bind-head">
-      <div>
-        <div class="label">待绑定人脸</div>
-        <div class="sub">
-          算法注册的人脸还没有学号。逐个输学号后一次提交，edge 会把学号和这张脸绑在一起。
-          <template v-if="enrollCamera"> · 注册机位 {{ enrollCamera }}</template>
+    <div class="page">
+      <!-- 左：机位预览 -->
+      <section class="preview-col">
+        <div class="col-head">
+          <span class="label">注册预览 · {{ enrollCamera || cameraLabel }}</span>
+          <span class="detect" :class="{ off: !cameraOnline }">
+            <span class="dot pulse" />
+            {{ cameraOnline ? `检测到 ${edge.personCount} 人` : "机位无信号" }}
+          </span>
         </div>
-      </div>
-      <button class="pull-btn" :disabled="loadingIdentities" @click="loadIdentities">
-        {{ loadingIdentities ? "拉取中…" : "拉取注册结果" }}
-      </button>
-    </div>
 
-    <div v-if="problem === 'error'" class="bind-err">{{ problemText }}</div>
-
-    <div v-if="offRoster.length" class="bind-warn">
-      有 {{ offRoster.length }} 人的学号不在本课名单里（{{ offRoster.map((r) => r.studentNo).join("、") }}），
-      已经绑上，云端入库时会再按学号解析。若是输错，重新绑一次即可覆盖。
-    </div>
-
-    <div v-if="!bindRows.length" class="bind-empty">
-      <div class="be-t">没有待绑定的人脸</div>
-      <div class="be-s">
-        课前请操作员先跑算法 enroll，再点右上角「拉取注册结果」。<br />
-        课中若有没绑学号的面孔在投篮，这里会自动出现。
-      </div>
-    </div>
-
-    <div v-else class="bind-grid">
-      <div v-for="r in bindRows" :key="r.localId" class="bind-card" :class="{ live: r.live }">
-        <div class="face">
-          <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
-          <div v-else class="no-face">
-            <span class="nf-ic">?</span>
-            <span class="nf-t">无缩略图</span>
-          </div>
-          <span v-if="r.live" class="live-tag">场上</span>
+        <div class="stage">
+          <div class="box" />
+          <div class="lock">{{ edge.personCount ? "已锁定目标" : "等待入镜" }}</div>
+          <EnrollSkeleton :width="130" :height="300" />
+          <div class="note mono">整班一次采集 · 跑完看脸绑学号</div>
         </div>
-        <div class="bc-id mono">{{ r.localId }}</div>
-        <input
-          v-model="noInput[r.localId]"
-          class="mono bc-input"
-          inputmode="numeric"
-          maxlength="10"
-          placeholder="10 位学号"
-          @keyup.enter="submitBind"
-        />
-      </div>
-    </div>
+      </section>
 
-    <div v-if="bindRows.length" class="bind-foot">
-      <span class="bf-note">
-        学号不在本课名单也能绑，提交后会提示。没有缩略图的面孔只能按 {{ "stu_XX" }} 认，
-        现场确认是谁再填。
-      </span>
-      <button class="bind-btn" :disabled="binding || !pendingCount" @click="submitBind">
-        {{ binding ? "绑定中…" : `绑定 ${pendingCount} 人` }}
-      </button>
-    </div>
-
-    <div v-if="bindings.length" class="bound">
-      <div class="label flat">已绑定 · {{ bindings.length }}</div>
-      <div class="bound-list">
-        <span v-for="b in bindings" :key="b.globalId || b.studentNo" class="bound-chip">
-          <b>{{ b.displayName || b.studentNo }}</b>
-          <i class="mono">{{ b.studentNo }}</i>
-        </span>
-      </div>
-    </div>
-  </div>
-
-  <div v-else class="page">
-    <!-- 左：预览与采集进度 -->
-    <section class="preview-col">
-      <div class="col-head">
-        <span class="label">注册预览 · {{ cameraLabel }}</span>
-        <span class="detect" :class="{ off: !cameraOnline }">
-          <span class="dot pulse" />
-          {{ cameraOnline ? `检测到 ${edge.personCount} 人` : "机位无信号" }}
-        </span>
-      </div>
-
-      <div class="stage">
-        <div class="box" />
-        <div class="lock">{{ edge.personCount ? "已锁定目标" : "等待入镜" }}</div>
-        <EnrollSkeleton :width="130" :height="300" />
-        <div class="note mono">3D 骨架 17 点 · 多角度采集</div>
-      </div>
-
-      <div class="frames">
-        <span class="label flat">采集帧</span>
-        <div class="bars">
-          <div
-            v-for="i in totalFrames"
-            :key="i"
-            class="bar"
-            :class="{
-              done: i <= captured,
-              live: i === captured + 1 && capturing,
-            }"
-          />
-        </div>
-        <span class="mono count">{{ captured }} / {{ totalFrames }}</span>
-      </div>
-    </section>
-
-    <!-- 右：学号录入与建档 -->
-    <section class="form-col">
-      <div class="label">学号录入</div>
-
-      <div class="entry">
-        <input
-          v-model="studentNo"
-          class="mono no-input"
-          inputmode="numeric"
-          maxlength="10"
-          placeholder="10 位学号"
-          :disabled="capturing"
-          @keyup.enter="match"
-        />
-        <button class="match" :disabled="matching || capturing" @click="match">
-          {{ matching ? "匹配中" : "匹配" }}
-        </button>
-      </div>
-
-      <div v-if="matched" class="matched">
-        <span class="ava">{{ initial(matched.displayName) }}</span>
-        <div class="grow">
-          <div class="name">{{ matched.displayName }}</div>
-          <div class="meta mono">
-            {{ matched.studentNo }}
-            <template v-if="edge.lesson?.classCode"> · {{ edge.lesson.classCode }}班</template>
+      <!-- 右：采集与绑定 -->
+      <section class="cap-col">
+        <div v-if="!session" class="cap-card">
+          <div class="cap-t">先选课</div>
+          <div class="cap-need-lesson">
+            采集用当前课程 id 作为 session。请先在顶部选择本节课，再开始采集。
           </div>
         </div>
-        <span class="ok-tag"><span class="dot" />已匹配</span>
-      </div>
 
-      <p class="hint">
-        请学生面向{{ cameraLabel }}站立，系统采集 {{ totalFrames }} 帧多角度姿态并绑定到该学号，
-        用于本节课的身份识别。
-      </p>
+        <template v-else>
+          <!-- 采集控制 -->
+          <div class="cap-card">
+            <div class="cap-t">{{ running ? "采集中" : "开始采集" }}</div>
 
-      <div v-if="progress" class="status" :class="{ done }">
-        <span class="dot" :class="done ? 'ok' : 'brand'" />
-        <span class="grow">{{ enrollCn(progress.status) }}</span>
-        <span v-if="done && progress.galleryVersion" class="mono">
-          特征版本 v{{ progress.galleryVersion }}
-        </span>
-      </div>
+            <div v-if="running" class="cap-running">
+              <span class="spinner" />
+              <div>
+                <!-- 后端的 message 常常就是「采集中」，和上面的标题重复，那就不显示 -->
+                <div class="cap-state">
+                  {{ runMsg && runMsg !== "采集中" ? runMsg : "算法正在采集人脸，请让学生依次入镜" }}
+                </div>
+                <div class="cap-elapsed">已进行 {{ shortClock(elapsed) }}</div>
+              </div>
+            </div>
+            <div v-else class="cap-s">
+              让本节课的学生依次站到{{ enrollCamera || cameraLabel }}前，点下面的按钮开始。
+              算法会一次性采下全班的人脸，跑完再逐个输学号绑定 —— 不用一个个来。
+            </div>
 
-      <button
-        class="submit"
-        :disabled="!matched || capturing"
-        @click="startCapture"
-      >
-        {{ capturing ? "采集中…" : done ? "重新采集" : "采集并建档" }}
-      </button>
+            <div v-if="runState === 'SUCCEEDED' && !running" class="cap-msg ok">
+              采集完成{{ runMsg ? `：${runMsg}` : "" }}。下面是算法注册到的人，逐个输学号即可。
+            </div>
+            <div v-else-if="runState === 'FAILED'" class="cap-msg bad">
+              采集失败{{ runMsg ? `：${runMsg}` : "" }}。可以重新开始一轮。
+            </div>
+            <div v-if="problemText" class="cap-msg bad">{{ problemText }}</div>
 
-      <div class="pair">
-        <button class="ghost" :disabled="capturing" @click="match">重新对准</button>
-        <button class="ghost mute" @click="reset">取消</button>
-      </div>
+            <div v-if="!running" class="cap-opts">
+              <div class="cap-fld">
+                <label>采集时长（秒）</label>
+                <input v-model="opts.seconds" inputmode="numeric" placeholder="45" />
+              </div>
+              <div class="cap-fld">
+                <label>预期人数（选填）</label>
+                <input v-model="opts.expectedPersons" inputmode="numeric" placeholder="不填不核对" />
+              </div>
+            </div>
 
-      <div class="spacer" />
+            <button v-if="!running" class="cap-go" :disabled="starting" @click="startCapture">
+              {{ starting ? "启动中…" : runState === "NONE" ? "开始采集" : "重新采集" }}
+            </button>
+          </div>
 
-      <div v-if="problem === 'notFound'" class="alarm">
-        <span class="bang">!</span>
-        <div class="grow">
-          <div class="ttl">该学号未注册</div>
-          <div class="sub">如学号无法匹配，请核对后重试或先在教师端建档</div>
-        </div>
-      </div>
+          <!-- 绑定 -->
+          <div class="bind-head" style="margin-top: 4px">
+            <div>
+              <div class="label">待绑定人脸</div>
+              <div class="sub">
+                算法注册到的人脸还没有学号。逐个输学号后一次提交，edge 会把学号和这张脸绑在一起。
+              </div>
+            </div>
+            <button class="pull-btn" :disabled="loadingIdentities" @click="loadIdentities">
+              {{ loadingIdentities ? "拉取中…" : "拉取注册结果" }}
+            </button>
+          </div>
 
-      <div v-else-if="problem === 'error'" class="alarm">
-        <span class="bang">!</span>
-        <div class="grow">
-          <div class="ttl">操作失败</div>
-          <div class="sub">{{ problemText }}</div>
-        </div>
-      </div>
-    </section>
-  </div>
+          <div v-if="offRoster.length" class="bind-warn">
+            有 {{ offRoster.length }} 人的学号不在本课名单里（{{ offRoster.map((r) => r.studentNo).join("、") }}），
+            已经绑上，云端入库时会再按学号解析。若是输错，重新绑一次即可覆盖。
+          </div>
+
+          <div v-if="!bindRows.length" class="bind-empty">
+            <div class="be-t">还没有待绑定的人脸</div>
+            <div class="be-s">
+              先完成上面的采集，跑完会自动列出算法注册到的人。<br />
+              课中若有没绑学号的面孔在投篮，这里也会自动出现。
+            </div>
+          </div>
+
+          <div v-else class="bind-grid">
+            <div v-for="r in bindRows" :key="r.localId" class="bind-card" :class="{ live: r.live }">
+              <div class="face">
+                <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
+                <div v-else class="no-face">
+                  <span class="nf-ic">?</span>
+                  <span class="nf-t">无缩略图</span>
+                </div>
+                <span v-if="r.live" class="live-tag">场上</span>
+              </div>
+              <div class="bc-id mono">{{ r.localId }}</div>
+              <input
+                v-model="noInput[r.localId]"
+                class="mono bc-input"
+                inputmode="numeric"
+                maxlength="10"
+                placeholder="10 位学号"
+                @keyup.enter="submitBind"
+              />
+            </div>
+          </div>
+
+          <div v-if="bindRows.length" class="bind-foot">
+            <span class="bf-note">
+              学号不在本课名单也能绑，提交后会提示。没有缩略图的面孔只能按 stu_XX 认，
+              现场确认是谁再填。
+            </span>
+            <button class="bind-btn" :disabled="binding || !pendingCount" @click="submitBind">
+              {{ binding ? "绑定中…" : `绑定 ${pendingCount} 人` }}
+            </button>
+          </div>
+
+          <div v-if="bindings.length" class="bound">
+            <div class="label flat">已绑定 · {{ bindings.length }}</div>
+            <div class="bound-list">
+              <span v-for="b in bindings" :key="b.globalId || b.studentNo" class="bound-chip">
+                <b>{{ b.displayName || b.studentNo }}</b>
+                <i class="mono">{{ b.studentNo }}</i>
+              </span>
+            </div>
+          </div>
+        </template>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -473,51 +395,6 @@ function reset() {
 }
 
 /* ---- 模式切换 ---- */
-.modes {
-  flex: none;
-  display: flex;
-  gap: 8px;
-  padding: 20px 30px 16px;
-}
-
-.mode {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 18px;
-  border-radius: 19px;
-  background: var(--fill);
-  color: var(--ink-3);
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.mode:hover {
-  background: var(--fill-2);
-}
-
-.mode.on {
-  background: var(--ink);
-  color: #fff;
-}
-
-.mode .cnt {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--red);
-  color: #fff;
-  font: 700 11px/20px var(--mono);
-  text-align: center;
-}
-
-.mode.on .cnt {
-  background: var(--brand);
-}
-
-/* ---- 看脸绑学号 ---- */
 .bind-page {
   flex: 1;
   overflow-y: auto;
@@ -894,205 +771,184 @@ function reset() {
 }
 
 /* ---- 右 ---- */
-.form-col {
+
+/* ---- 采集（edge 托管，整班一次） ---- */
+.cap-col {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  gap: 14px;
 }
 
-.form-col > .label {
-  margin-bottom: 12px;
-}
-
-.entry {
-  display: flex;
-  gap: 11px;
-  margin-bottom: 14px;
-}
-
-.no-input {
-  flex: 1;
-  background: var(--card);
-  border: 1.5px solid var(--line-3);
-  border-radius: 13px;
-  padding: 15px 18px;
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  outline: none;
-}
-
-.no-input:focus {
-  border-color: var(--brand);
-}
-
-.match {
-  background: var(--brand);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-  border-radius: 13px;
-  padding: 0 22px;
-  flex: none;
-}
-
-.matched {
+.cap-card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 15px;
-  padding: 16px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  margin-bottom: 14px;
+  border-radius: 20px;
+  padding: 22px;
 }
 
-.ava {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: var(--brand);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.cap-t {
   font-size: 17px;
-  font-weight: 600;
-  flex: none;
-}
-
-.grow {
-  flex: 1;
-  min-width: 0;
-}
-
-.matched .name {
-  font-size: 18px;
   font-weight: 700;
+  margin-bottom: 8px;
 }
 
-.matched .meta {
+.cap-s {
   font-size: 13px;
+  line-height: 1.75;
   color: var(--ink-4);
-  margin-top: 3px;
-}
-
-.ok-tag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--green);
-  flex: none;
-}
-
-.ok-tag .dot {
-  background: var(--green);
-}
-
-.hint {
-  font-size: 13px;
-  color: var(--ink-5);
-  line-height: 1.6;
   margin-bottom: 18px;
 }
 
-.status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--brand-bg-2);
-  border: 1px solid var(--brand-line);
-  border-radius: 13px;
-  padding: 12px 15px;
+.cap-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.cap-fld label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-5);
+  margin-bottom: 6px;
+}
+
+.cap-fld input {
+  width: 100%;
+  height: 40px;
+  border-radius: 11px;
+  border: 1px solid var(--line-3);
+  background: var(--fill);
+  padding: 0 12px;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--brand-deep);
-  margin-bottom: 12px;
+  color: var(--ink);
 }
 
-.status.done {
-  background: var(--green-bg);
-  border-color: var(--green);
-  color: var(--green);
+.cap-fld input:focus {
+  outline: none;
+  border-color: var(--brand);
+  background: var(--card);
 }
 
-.status .dot.brand {
-  background: var(--brand);
-}
-.status .dot.ok {
-  background: var(--green);
-}
-
-.submit {
+.cap-go {
+  width: 100%;
+  height: 50px;
+  border-radius: 15px;
   background: var(--brand);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
-  border-radius: 13px;
-  padding: 15px;
   box-shadow: var(--shadow-brand);
-  margin-bottom: 11px;
 }
 
-.pair {
-  display: flex;
-  gap: 11px;
+.cap-go:disabled {
+  opacity: 0.45;
+  box-shadow: none;
 }
 
-.ghost {
-  flex: 1;
-  border: 1px solid var(--line-3);
-  background: var(--card);
-  color: var(--ink-2);
-  font-size: 15px;
-  font-weight: 600;
-  border-radius: 13px;
-  padding: 13px;
-}
-
-.ghost.mute {
-  color: var(--ink-4);
-}
-
-.spacer {
-  flex: 1;
-}
-
-.alarm {
-  background: var(--red-bg-2);
-  border: 1px solid var(--red-line);
-  border-radius: 14px;
-  padding: 14px 16px;
+.cap-running {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
-.bang {
+.spinner {
   width: 26px;
   height: 26px;
-  border-radius: 8px;
-  background: var(--red);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 700;
+  border-radius: 50%;
+  border: 3px solid var(--brand-line);
+  border-top-color: var(--brand);
+  animation: spin 0.9s linear infinite;
   flex: none;
 }
 
-.alarm .ttl {
-  font-size: 14px;
-  font-weight: 700;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cap-state {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cap-elapsed {
+  font: 600 13px/1 var(--mono);
+  color: var(--ink-4);
+  margin-top: 5px;
+}
+
+.cap-msg {
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-size: 13px;
+  line-height: 1.65;
+  margin-bottom: 16px;
+}
+
+.cap-msg.ok {
+  background: var(--green-bg);
+  color: var(--ink-2);
+}
+
+.cap-msg.bad {
+  background: var(--red-bg);
   color: var(--red-deep);
 }
 
-.alarm .sub {
-  font-size: 12px;
-  color: #b0787a;
-  margin-top: 2px;
+.cap-need-lesson {
+  background: var(--brand-bg);
+  color: var(--brand-deep);
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.step-row {
+  display: flex;
+  gap: 8px;
+  padding: 20px 30px 16px;
+  flex: none;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 19px;
+  background: var(--fill);
+  color: var(--ink-4);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.step.on {
+  background: var(--ink);
+  color: #fff;
+}
+
+.step.done {
+  background: var(--green-bg);
+  color: var(--ink-2);
+}
+
+.step .n {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  font: 700 11px/20px var(--mono);
+  text-align: center;
+}
+
+.step.on .n {
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>

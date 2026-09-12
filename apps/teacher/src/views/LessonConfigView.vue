@@ -2,17 +2,17 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  actionLabel,
-  checkpointLabel,
-  hasCheckpointLabel,
+  actionVocab,
+  checkpointVocab,
+  checkpointsForActions,
   errText,
-  isSafetyCheckpoint,
-  metaApi,
   fromLocalInput,
   isCode,
   lessonApi,
   lessonStatusLabel,
+  loadVocabulary,
   toLocalInput,
+  vocabulary,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
 
@@ -31,61 +31,58 @@ const form = ref({
   actionTypes: [],
   enabledCheckpoints: [],
 })
-const customAction = ref('')
-const customCheckpoint = ref('')
 
-const ACTION_PRESETS = ['jump_shot', 'layup', 'free_throw', 'dribble', 'pass']
 /**
- * 检查点候选。
+ * 动作与检查点的候选项全部来自 GET /api/meta/vocabulary。
  *
- * 这里曾经写死过五个 id，那是项目早期没有真实词表时先占位的，
- * 和场边规则引擎（checkpoints.yaml）、云端实际存的 id 都对不上 ——
- * 老师把它们打开也不会有任何提示产生，还看不出为什么。所以不再臆造候选项。
- *
- * 现在的来源，按优先级：
- *   1. GET /api/meta/vocabulary —— 权威词表，开放后自动生效，前端不用改
- *   2. 本课已保存的 enabledCheckpoints —— 后端实际在用的 id
- *   3. 下面的自定义输入框 —— 手动补
+ * 这是强约束，不是建议：云端保存课程时会校验 actionTypes / enabledCheckpoints
+ * 里的每个 id 都在词表内，有一个不在就整单 40000 PARAM_INVALID。所以这里
+ * 不再提供「自定义 ID」输入框 —— 那等于引导老师填一个必然被拒的值。
  */
-const vocabulary = ref(null)
+const vocab = ref(vocabulary())
 
-async function loadVocabulary() {
-  try {
-    const v = await metaApi.vocabulary()
-    if (Array.isArray(v?.checkpoints) && v.checkpoints.length) vocabulary.value = v.checkpoints
-  } catch {
-    // 接口未开放（404 / 50100），退回本课已有 + 本地兜底中文名
-  }
-}
-
-/** 词表里的中文名优先，其次本地兜底表 */
-function cpLabel(id) {
-  const hit = vocabulary.value?.find((c) => c.id === id)
-  return hit?.label || checkpointLabel(id)
-}
-
-/** 有没有中文名可显示；没有就只能把 id 原样摆出来 */
-function cpNamed(id) {
-  return !!vocabulary.value?.find((c) => c.id === id)?.label || hasCheckpointLabel(id)
-}
-
-function cpSafety(id) {
-  const hit = vocabulary.value?.find((c) => c.id === id)
-  return typeof hit?.safety === 'boolean' ? hit.safety : isSafetyCheckpoint(id)
+async function refreshVocabulary() {
+  vocab.value = await loadVocabulary()
 }
 
 const editable = computed(() => lesson.value?.status === 'PLANNED')
-const actionOptions = computed(() => [...new Set([...ACTION_PRESETS, ...form.value.actionTypes])])
-const checkpointOptions = computed(() => [
-  ...new Set([...(vocabulary.value || []).map((c) => c.id), ...form.value.enabledCheckpoints]),
-])
+
+const actionOptions = computed(() => actionVocab(vocab.value))
+
+/** 检查点按已选动作过滤：先选动作再勾检查点，比一次摊开 13 项清楚 */
+const checkpointOptions = computed(() => checkpointsForActions(form.value.actionTypes, vocab.value))
+
+/**
+ * 本课存着、但词表里没有的 id。多半是早期占位值，保存时会被云端拒掉，
+ * 所以单独列出来让老师先清掉，而不是等提交后看一条看不懂的 40000。
+ */
+const staleActions = computed(() =>
+  form.value.actionTypes.filter((a) => !actionVocab(vocab.value).some((x) => x.id === a))
+)
+const staleCheckpoints = computed(() =>
+  form.value.enabledCheckpoints.filter((c) => !checkpointVocab(vocab.value).some((x) => x.id === c))
+)
+const hasStale = computed(() => staleActions.value.length + staleCheckpoints.value.length > 0)
+
+function dropStale() {
+  form.value.actionTypes = form.value.actionTypes.filter((a) => !staleActions.value.includes(a))
+  form.value.enabledCheckpoints = form.value.enabledCheckpoints.filter(
+    (c) => !staleCheckpoints.value.includes(c)
+  )
+}
 
 function toggleAction(a) {
   if (!editable.value) return
   const arr = form.value.actionTypes
   const i = arr.indexOf(a)
-  if (i >= 0) arr.splice(i, 1)
-  else arr.push(a)
+  if (i >= 0) {
+    arr.splice(i, 1)
+    // 取消动作后，只适用于它的检查点留着没意义，跟着摘掉
+    const still = new Set(checkpointsForActions(arr, vocab.value).map((c) => c.id))
+    form.value.enabledCheckpoints = form.value.enabledCheckpoints.filter((c) => still.has(c))
+  } else {
+    arr.push(a)
+  }
 }
 
 function toggleCheckpoint(c) {
@@ -94,20 +91,6 @@ function toggleCheckpoint(c) {
   const i = arr.indexOf(c)
   if (i >= 0) arr.splice(i, 1)
   else arr.push(c)
-}
-
-function addAction() {
-  const v = customAction.value.trim()
-  if (!v) return
-  if (!form.value.actionTypes.includes(v)) form.value.actionTypes.push(v)
-  customAction.value = ''
-}
-
-function addCheckpoint() {
-  const v = customCheckpoint.value.trim()
-  if (!v) return
-  if (!form.value.enabledCheckpoints.includes(v)) form.value.enabledCheckpoints.push(v)
-  customCheckpoint.value = ''
 }
 
 async function load() {
@@ -162,7 +145,7 @@ async function save() {
 }
 onMounted(() => {
   load()
-  loadVocabulary()
+  refreshVocabulary()
 })
 </script>
 
@@ -228,18 +211,19 @@ onMounted(() => {
             <div class="acts-row">
               <button
                 v-for="a in actionOptions"
-                :key="a"
+                :key="a.id"
                 class="act-chip"
-                :class="{ on: form.actionTypes.includes(a) }"
+                :class="{ on: form.actionTypes.includes(a.id) }"
                 :disabled="!editable"
-                @click="toggleAction(a)"
+                :title="`${a.id} · 机位 ${(a.cameras || []).join('/') || '—'}`"
+                @click="toggleAction(a.id)"
               >
-                {{ actionLabel(a) }}
+                {{ a.label }}
               </button>
             </div>
-            <div v-if="editable" class="add-row">
-              <input v-model="customAction" class="txt" style="height: 42px; border-radius: 10px" placeholder="自定义动作 ID（与后端词表一致）" @keyup.enter="addAction" />
-              <button class="btn sm" @click="addAction">添加</button>
+            <div class="hint-row" style="margin-top: 12px">
+              <span class="i">i</span>
+              <span>候选来自词表接口，勾选后下方才会列出对应的检查点。</span>
             </div>
           </div>
         </div>
@@ -250,43 +234,45 @@ onMounted(() => {
             <span class="sec-label" style="margin: 0">检查点配置 · CHECKPOINTS</span>
             <span style="font: 500 12px/1 var(--mono); color: var(--gray-3)">{{ form.enabledCheckpoints.length }} 项启用</span>
           </div>
+          <!-- 存着但词表里没有的 id：保存时会被云端 40000 拒掉，先清干净 -->
+          <div v-if="hasStale" class="stale-box">
+            <div class="stale-t">有 {{ staleActions.length + staleCheckpoints.length }} 个 ID 不在词表里</div>
+            <div class="stale-s">
+              <span v-for="x in [...staleActions, ...staleCheckpoints]" :key="x" class="stale-chip">{{ x }}</span>
+            </div>
+            <div class="stale-n">
+              这些多半是早期的占位值。保存时云端会整单拒掉（40000），场边也不会触发。
+            </div>
+            <button v-if="editable" class="btn sm" @click="dropStale">全部移除</button>
+          </div>
+
           <div class="panel soft" style="overflow: hidden">
-            <div v-for="c in checkpointOptions" :key="c" class="cp-row">
+            <div v-for="c in checkpointOptions" :key="c.id" class="cp-row">
               <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                <template v-if="cpNamed(c)">
-                  <span class="cp-name">{{ cpLabel(c) }}</span>
-                  <span class="cp-id">{{ c }}</span>
-                </template>
-                <template v-else>
-                  <span class="cp-id plain">{{ c }}</span>
-                  <span class="unnamed-tag" title="词表里没有登记这个 ID 的中文名">未登记</span>
-                </template>
-                <span v-if="cpSafety(c)" class="safety-tag">安全</span>
+                <span class="cp-name">{{ c.label }}</span>
+                <span class="cp-id">{{ c.id }}</span>
+                <span v-if="c.safety" class="safety-tag">安全</span>
               </div>
               <button
                 class="switch"
-                :class="{ on: form.enabledCheckpoints.includes(c) }"
+                :class="{ on: form.enabledCheckpoints.includes(c.id) }"
                 :disabled="!editable"
-                @click="toggleCheckpoint(c)"
+                @click="toggleCheckpoint(c.id)"
               >
                 <span class="knob"></span>
               </button>
             </div>
-            <div v-if="!checkpointOptions.length" class="empty-hint">暂无检查点，可在下方添加</div>
+            <div v-if="!checkpointOptions.length" class="empty-hint">
+              {{ form.actionTypes.length ? '所选动作暂无对应检查点' : '先在左侧选训练动作' }}
+            </div>
           </div>
-          <div v-if="editable" class="add-row" style="margin-top: 12px">
-            <input v-model="customCheckpoint" class="txt" style="height: 42px; border-radius: 10px" placeholder="自定义检查点 ID" @keyup.enter="addCheckpoint" />
-            <button class="btn sm" @click="addCheckpoint">添加</button>
-          </div>
+
           <div class="hint-row">
             <span class="i">i</span>
             <span>
-              这些 ID 会原样下发给场边规则引擎与知识库，三边必须用同一套命名；写错不会报错，只是永远不触发。
-              <template v-if="!vocabulary">
-                词表接口（<code>/api/meta/vocabulary</code>）尚未开放，所以候选项只列本课已有的；
-                标「未登记」的是前端没有它的中文名，不影响使用。
-              </template>
-              <template v-else>中文名来自词表接口。</template>
+              候选按所选动作过滤，全部来自词表接口（<code>/api/meta/vocabulary</code>）。
+              这套 ID 与场边规则引擎、即时反馈落库完全一致：勾了才会在现场触发提示；
+              不在词表里的 ID 保存时会被云端拒掉，所以这里不提供手填入口。
             </span>
           </div>
         </div>
@@ -373,17 +359,36 @@ onMounted(() => {
   border-radius: 6px;
   padding: 3px 7px;
 }
-.cp-id.plain {
-  font-size: 13px;
+.stale-box {
+  background: var(--warn-bg);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.stale-t {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--warn);
+  margin-bottom: 10px;
+}
+.stale-s {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.stale-chip {
+  font: 500 12px/1 var(--mono);
+  background: #fff;
+  border-radius: 6px;
+  padding: 5px 8px;
   color: var(--ink-2);
 }
-.unnamed-tag {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--gray);
-  background: var(--fill-2);
-  border-radius: 6px;
-  padding: 2px 6px;
+.stale-n {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+  margin-bottom: 12px;
 }
 .hint-row code {
   font: 500 11px/1 var(--mono);

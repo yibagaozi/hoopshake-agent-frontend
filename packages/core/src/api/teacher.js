@@ -79,7 +79,10 @@ export const teacherChatApi = {
   removeSession: (sessionId) => http.delete(`/api/teacher/chat/sessions/${sessionId}`),
 }
 
-/** §12 词表 /api/meta（🚧 当前 404/50100，降级用本地映射） */
+/**
+ * 词表 /api/meta —— 全系统唯一权威来源，任意已登录用户可读。
+ * 一般不直接调它：用 vocabulary.js 里的 loadVocabulary()，那边带 version 缓存与兜底。
+ */
 export const metaApi = {
   vocabulary: () => http.get('/api/meta/vocabulary'),
 }

@@ -13,6 +13,21 @@ export {
 } from './http.js'
 export { sseRequest } from './sse.js'
 export { normalizePage, pageItems } from './page.js'
+export {
+  FALLBACK_VOCABULARY,
+  vocabulary,
+  isVocabularyFresh,
+  loadVocabulary,
+  actionVocab,
+  checkpointVocab,
+  vocabActionLabel,
+  vocabCheckpointLabel,
+  inVocabulary,
+  vocabIsSafety,
+  checkpointsForActions,
+  phasesOf,
+  phaseLabel,
+} from './vocabulary.js'
 export { renderMarkdown } from './markdown.js'
 export { ERROR_MESSAGES, errText, isNotOpen } from './errors.js'
 export * from './enums.js'

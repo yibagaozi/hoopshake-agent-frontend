@@ -37,6 +37,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 错误枚举名 → 文案。
+ * 新一批接口（采集/绑定）的文档是按 data.error 的**枚举名**描述的，
+ * 而不是数字码，所以这里按名字兜一层；数字码那套还在下面，两者都查。
+ */
+export const ERROR_TEXT_BY_NAME = {
+  PARAM_INVALID: "参数有误，请检查输入",
+  ENROLL_BUSY: "已经有一轮采集在跑，等它结束再开始",
+  ENROLL_UNAVAILABLE: "这台场边主机没配采集编排，请联系运维",
+  ROSTER_NOT_LOADED: "还没拉参课名单，先同步一次名单再操作",
+  NOT_FOUND: "没有找到对应的数据",
+};
+
+/** 取后端给的错误枚举名（信封 data.error），拿不到返回空串 */
+export function edgeErrorName(err) {
+  return (err instanceof ApiError && err.info?.error) || "";
+}
+
 /** 错误码 → 现场能看懂的文案。没登记的落到后端 message */
 export const ERROR_TEXT = {
   [ErrorCode.PARAM_INVALID]: "参数有误，请检查输入",
@@ -59,11 +77,13 @@ export const ERROR_TEXT = {
   [ErrorCode.OBJECT_STORAGE_FAILED]: "对象存储写入失败",
 };
 
-/** 把任意错误转成可展示文案 */
+/** 把任意错误转成可展示文案：先按枚举名，再按数字码，最后落到后端 message */
 export function edgeErrText(err, fallback = "操作失败，请稍后重试") {
   if (err instanceof ApiError) {
     if (err.offline) return err.message;
-    return ERROR_TEXT[err.code] || err.message || fallback;
+    return (
+      ERROR_TEXT_BY_NAME[edgeErrorName(err)] || ERROR_TEXT[err.code] || err.message || fallback
+    );
   }
   return err?.message || fallback;
 }

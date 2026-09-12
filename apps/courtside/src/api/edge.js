@@ -70,20 +70,40 @@ export const matchStudent = (studentNo) => post("/roster/match", { studentNo });
 
 /* ---------- 现场注册 ---------- */
 
-/** 开始采集，frames 缺省 5，camId 缺省取主锚点机位 */
-export const startEnroll = (payload) => post("/enroll/start", payload);
+/**
+ * 开始采集（edge 托管）。
+ *
+ * 注意这是**整班一次**的采集，不是按学号一个个建档 —— 拉起算法采集进程，
+ * 跑完后用 identities 看脸绑学号。session 约定就是当前课程 id。
+ *
+ * @param {string} session      必填，= lessonId，只允许字母数字和 _ -，≤64
+ * @param {object} [opts]       enrollCamera / seconds / sampleHz / expectedPersons，
+ *                              留空则用 edge 配置默认值
+ */
+export const startEnroll = (session, opts = {}) =>
+  post("/enroll/start", {
+    session,
+    ...(opts.enrollCamera ? { enrollCamera: opts.enrollCamera } : {}),
+    ...(opts.seconds ? { seconds: opts.seconds } : {}),
+    ...(opts.sampleHz ? { sampleHz: opts.sampleHz } : {}),
+    ...(opts.expectedPersons ? { expectedPersons: opts.expectedPersons } : {}),
+  });
 
-export const getEnrollProgress = (taskId) => get(`/enroll/${taskId}/progress`);
+/**
+ * 采集状态轮询。state ∈ RUNNING / SUCCEEDED / FAILED / NONE。
+ * 采集进度**不走 WS**，只能轮询这里，建议 2~3 秒一次。
+ */
+export const getEnrollStatus = (session) =>
+  get(`/enroll/status?session=${encodeURIComponent(session)}`);
 
 /* ---------- 看脸绑学号 ---------- */
 
 /**
- * 算法 enroll 跑完后，列出它注册到的人。
- * edge 不负责跑 enroll，所以没有 push —— 操作员跑完后由前端主动拉。
- * @param {string} [session] 算法注册 session，不传取 edge 当前那个
+ * 拉注册结果。session **必填**，就是 start 时传的那个课程 id ——
+ * 不传拿不到数据（404 NOT_FOUND）。
  */
 export const getEnrollIdentities = (session) =>
-  get(`/enroll/identities${session ? `?session=${encodeURIComponent(session)}` : ""}`);
+  get(`/enroll/identities?session=${encodeURIComponent(session)}`);
 
 /** 人脸缩略图 URL（image/jpeg）。直接塞进 <img src>，不走 JSON 信封 */
 export const enrollThumbnailUrl = (session, localId) =>
@@ -96,7 +116,7 @@ export const enrollThumbnailUrl = (session, localId) =>
  */
 export const bindEnroll = (bindings) => post("/enroll/bind", { bindings });
 
-/** 当前已持久化的人脸绑定，排查与回显用 */
+/** 当前已持久化的人脸绑定。返回的是 globalId → {studentNo,studentId,displayName} 的 map */
 export const getEnrollBindings = () => get("/enroll/bindings");
 
 /* ---------- 录制 ---------- */

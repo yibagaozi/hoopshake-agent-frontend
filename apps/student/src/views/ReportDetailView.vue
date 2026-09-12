@@ -9,8 +9,11 @@ import {
   fmtDate,
   fmtMs,
   isNotOpen,
+  loadVocabulary,
   pageItems,
+  phaseLabel,
   studentDataApi,
+  vocabulary,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
 import BottomSheet from '../components/BottomSheet.vue'
@@ -112,7 +115,10 @@ async function exportPdf() {
   }
 }
 
+const vocab = ref(vocabulary())
+
 onMounted(async () => {
+  loadVocabulary().then((v) => (vocab.value = v))
   try {
     detail.value = await studentDataApi.sessionDetail(props.sessionId)
     const [cRes, fRes] = await Promise.all([
@@ -274,8 +280,9 @@ onMounted(async () => {
         <div class="info-row" v-if="clipDetail.zoneId"><span class="k">区域</span><span class="v">{{ clipDetail.zoneId }}</span></div>
       </div>
       <div v-if="clipDetail.phases?.length" class="info-card" style="margin-bottom: 14px">
+        <!-- 相位中文名来自词表的 phases.labels，拿不到就显示原 id -->
         <div class="info-row" v-for="p in clipDetail.phases" :key="p.name">
-          <span class="k">{{ p.name }}</span>
+          <span class="k">{{ phaseLabel(p.name, vocab) }}</span>
           <span class="v" style="font-family: var(--mono)">{{ fmtMs(p.start_ms) }} – {{ fmtMs(p.end_ms) }}</span>
         </div>
       </div>

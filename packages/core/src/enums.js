@@ -56,15 +56,22 @@ export function lessonStatusLabel(s) {
 }
 
 /** 训练动作 id → 展示名（词表接口未开放前的常用映射，未命中原样展示） */
+/**
+ * 动作 id → 中文名的**兜底**表，口径对齐 /api/meta/vocabulary。
+ * 下面前五条是词表里真实存在的；其余是历史数据里可能出现的旧值，
+ * 只为让老数据不显示成裸 id，不要用它们去配课程。
+ */
 export const ACTION_LABELS = {
-  jump_shot: '投篮',
+  free_throw: '罚篮',
+  jump_shot: '跳投',
+  layup: '上篮',
+  triple_threat: '突破',
+  pass: '传球',
+  // ↓ 历史遗留，词表里没有
   shooting: '投篮',
   shot: '投篮',
-  free_throw: '罚球',
-  layup: '上篮',
   dribble: '运球',
   dribbling: '运球',
-  pass: '传球',
   passing: '传球',
   rebound: '篮板',
   defense_slide: '防守滑步',
@@ -74,11 +81,12 @@ export const ACTION_LABELS = {
 
 /** 英文名，场边大屏中英并排时用 */
 export const ACTION_LABELS_EN = {
+  free_throw: 'Free Throw',
   jump_shot: 'Jump Shot',
   layup: 'Layup',
-  free_throw: 'Free Throw',
-  dribble: 'Dribble',
+  triple_threat: 'Triple Threat',
   pass: 'Pass',
+  dribble: 'Dribble',
   rebound: 'Rebound',
   defense_slide: 'Defense Slide',
 }
@@ -94,45 +102,29 @@ export function actionLabel(id) {
 }
 
 /** 检查点 id → 展示名（同上，词表接口开放后应改为动态拉取） */
+/**
+ * 检查点 id → 中文名的**兜底**表。
+ *
+ * 权威来源是 GET /api/meta/vocabulary（见 vocabulary.js）；渲染时应优先用
+ * 事件/接口随数据带回的 label，其次查词表，最后才落到这里。
+ * 这里只保留词表里真实存在的 id —— 早期那批 elbow_alignment / release_timing /
+ * release_elbow_extension 之类是没有词表时编的占位，配了云端会 40000 拒掉、
+ * 场边也不会触发，已全部删除。
+ */
 export const CHECKPOINT_LABELS = {
-  // 注意：这里是「检查点」名称（检查什么），不是违规现象本身。
-  // 例如 elbow_alignment 是「肘部对齐」，其违规表现才叫「肘部外翻」(elbow_flare)。
-  //
-  // 这份表只是**兜底**：实时通道（edge 的 cue/safetyAlert）与云端反馈流都会
-  // 带 checkpointLabel，优先用后端给的那个，这里只在字段缺失时顶上。
-  // 下面 ft./js./lu./safety. 开头的 id 来自 edge 的 checkpoints.yaml，
-  // 点号命名，和早期这套下划线命名不是一套，别混用。
   'ft.load.knee': '蓄力屈膝',
+  'ft.set.elbow': '设定点肘位',
   'ft.release.elbow': '出手肘伸展',
-  'ft.release.height': '出手高度',
+  'ft.release.wrist': '出手压腕',
   'ft.follow.elbow': '跟随伸展',
+  'js.load.knee': '起跳蓄力',
   'js.release.elbow': '跳投出手肘',
+  'js.release.wrist': '跳投压腕',
+  'js.follow.elbow': '跳投跟随',
+  'lu.takeoff.knee': '上篮起跳蹬伸',
   'lu.finish.elbow': '上篮终结伸展',
-  'safety.trunk_lean': '躯干后仰',
+  'tt.load.knee': '三威胁重心',
   'safety.layup_landing_knee': '落地屈膝缓冲',
-
-  // 云端课程配置里见到的 id，和上面两套又不是一套。中文名照 checkpoints.yaml
-  // 里同义项的叫法，若贵方另有习惯叫法以那个为准
-  release_elbow_extension: '出手肘伸展',
-  release_knee_symmetry: '出手膝对称',
-
-  elbow_alignment: '肘部对齐',
-  elbow_under_ball: '肘在球下',
-  elbow_flare: '肘部外翻',
-  release_timing: '出手时机',
-  early_release: '出手偏早',
-  follow_through: '随挥收势',
-  wrist_snap: '手腕下压',
-  arc: '投篮弧线',
-  balance: '身体平衡',
-  jump_balance: '起跳平衡',
-  jump_forward: '起跳偏前',
-  knee_valgus: '落地膝内扣',
-  landing_balance: '落地平衡',
-  landing_buffer: '落地缓冲',
-  foot_alignment: '双脚站位',
-  center_of_gravity: '重心控制',
-  footwork: '脚步',
 }
 
 export function checkpointLabel(id) {
@@ -140,21 +132,19 @@ export function checkpointLabel(id) {
   return CHECKPOINT_LABELS[id] || CHECKPOINT_LABELS[String(id).toLowerCase()] || id
 }
 
-/** 本地表里有没有登记这个 id。界面靠它区分「有中文名」和「只能原样显示 id」 */
+/** 本地兜底表里有没有登记这个 id */
 export function hasCheckpointLabel(id) {
   if (!id) return false
   return !!(CHECKPOINT_LABELS[id] || CHECKPOINT_LABELS[String(id).toLowerCase()])
 }
 
 /** 安全类检查点（触发时按安全提醒处理） */
-/** 早期下划线命名里的安全项；点号命名的一律靠 safety. 前缀识别 */
-const SAFETY_CHECKPOINTS = new Set(['knee_valgus', 'landing_buffer'])
-
+/**
+ * 是不是安全项的**兜底**判断：词表里带 safety 字段，能拿到词表就用那个
+ * （vocabIsSafety）。这里只认 safety. 前缀，不按关键词模糊匹配 ——
+ * 那会把 ft.load.knee（蓄力屈膝，普通检查点）也当成安全告警。
+ */
 export function isSafetyCheckpoint(id) {
   if (!id) return false
-  const s = String(id).toLowerCase()
-  // edge 的 checkpoints.yaml 用 safety. 前缀显式标注安全项。
-  // 这里不再按关键词模糊匹配 —— 那会把 ft.load.knee（蓄力屈膝，普通 MINOR 项）
-  // 也当成安全告警，误标比漏标更糟。
-  return s.startsWith('safety.') || SAFETY_CHECKPOINTS.has(s)
+  return String(id).toLowerCase().startsWith('safety.')
 }
