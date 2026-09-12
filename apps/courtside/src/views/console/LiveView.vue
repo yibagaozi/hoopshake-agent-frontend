@@ -75,9 +75,66 @@ const onPause = () => run("pause", () => edge.pause());
 const onResume = () => run("resume", () => edge.resume());
 const onStop = () =>
   run("stop", async () => {
+    // 下课前把 sessionId 记下来：stop 之后 /local/state 里的会话会转成 ENDED，
+    // 课后处理要拿它去调 process / publish
+    const before = edge.session?.sessionId;
     const r = await edge.stop();
-    toast.value = `已下课，共 ${r.segmentCount ?? 0} 段录制`;
+    endedSession.value = {
+      sessionId: r?.sessionId || before,
+      segmentCount: r?.segmentCount ?? 0,
+      durationSeconds: r?.durationSeconds ?? edge.elapsedSeconds,
+    };
+    postOpen.value = true;
+    toast.value = `已下课，共 ${endedSession.value.segmentCount} 段录制`;
   });
+
+/* ---------------- 课后处理 ---------------- */
+
+/**
+ * 下课之后要跑算法批处理，把这节课切分、评分并出云。
+ * process 是异步的，edge 立即返回 accepted，没有进度回调，也没有完成事件推给前端
+ * （sessionProcessed 走的是 CV→edge 的内部通道），所以这里只报「已提交」。
+ */
+const endedSession = ref(null);
+const postOpen = ref(false);
+/** idle / running / accepted / failed */
+const postState = ref("idle");
+const postMsg = ref("");
+const postKind = ref("");
+
+/** 离开页面再回来时，会话还是 ENDED 就还能重新打开课后处理 */
+const canReopenPost = computed(
+  () => edge.sessionState === "ENDED" && !!(endedSession.value?.sessionId || edge.session?.sessionId),
+);
+
+function openPost() {
+  if (!endedSession.value) {
+    endedSession.value = {
+      sessionId: edge.session?.sessionId,
+      segmentCount: edge.session?.segmentCount ?? 0,
+      durationSeconds: edge.elapsedSeconds,
+    };
+  }
+  postState.value = "idle";
+  postMsg.value = "";
+  postOpen.value = true;
+}
+
+async function runPost(kind) {
+  const sid = endedSession.value?.sessionId;
+  if (!sid || postState.value === "running") return;
+  postKind.value = kind;
+  postState.value = "running";
+  postMsg.value = "";
+  try {
+    if (kind === "process") await edgeApi.processSession(sid);
+    else await edgeApi.publishSession(sid);
+    postState.value = "accepted";
+  } catch (e) {
+    postState.value = "failed";
+    postMsg.value = edgeErrText(e);
+  }
+}
 const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
 </script>
 
@@ -216,6 +273,9 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
             >
               {{ startLabel }}
             </button>
+            <button v-if="canReopenPost" class="ghost full" @click="openPost">
+              课后处理
+            </button>
           </template>
         </div>
 
@@ -259,10 +319,233 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
 
       <div v-if="toast" class="toast">{{ toast }}</div>
     </section>
+    <!-- 下课后的批处理。放在这里而不是录制页：下课是老师本来就在做的动作，
+         顺手把「跑算法出云」接在后面，不用再记得去别处点一次 -->
+    <div v-if="postOpen" class="post-mask" @click.self="postOpen = false">
+      <div class="post">
+        <div class="post-head">
+          <div>
+            <div class="post-t">本节课已结束</div>
+            <div class="post-s mono">
+              {{ endedSession?.sessionId || "—" }}
+            </div>
+          </div>
+          <button class="post-x" @click="postOpen = false">✕</button>
+        </div>
+
+        <div class="post-meta">
+          <span><i>时长</i>{{ clock(endedSession?.durationSeconds || 0) }}</span>
+          <span><i>录制</i>{{ endedSession?.segmentCount ?? 0 }} 段</span>
+          <span v-if="edge.lesson?.title"><i>课程</i>{{ edge.lesson.title }}</span>
+        </div>
+
+        <p class="post-note">
+          接下来要跑算法批处理：把这节课的动作切分、评分，再同步到云端，学生和老师才能在
+          报告里看到本节课。处理在场边主机后台进行，需要一段时间，
+          <b>提交后可以直接关掉这个窗口</b>，不用守着。
+        </p>
+
+        <div v-if="postState === 'accepted'" class="post-ok">
+          <span class="dot" />
+          {{ postKind === "process" ? "批处理已提交，正在后台跑" : "已提交出云" }}。
+          完成后学生端与教师端才会出现本节课的数据。
+        </div>
+        <div v-else-if="postState === 'failed'" class="post-err">{{ postMsg }}</div>
+
+        <div class="post-acts">
+          <button
+            class="post-primary"
+            :disabled="postState === 'running' || postState === 'accepted'"
+            @click="runPost('process')"
+          >
+            {{ postState === "running" && postKind === "process" ? "提交中…" : "跑批处理并出云" }}
+          </button>
+          <button
+            class="post-second"
+            :disabled="postState === 'running' || postState === 'accepted'"
+            @click="runPost('publish')"
+          >
+            {{ postState === "running" && postKind === "publish" ? "提交中…" : "已跑过批处理，直接出云" }}
+          </button>
+        </div>
+
+        <div class="post-hint">
+          批处理没在这台机器上配（50331）时，用「直接出云」把已经跑好的结果发上去；
+          反过来交接文件还没生成（40915）就得先跑批处理。
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* ---- 课后处理 ---- */
+.post-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(12, 12, 14, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  backdrop-filter: blur(2px);
+}
+
+.post {
+  width: 520px;
+  max-width: 100%;
+  background: var(--card);
+  border-radius: 24px;
+  padding: 26px 28px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+.post-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.post-t {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.post-s {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-5);
+}
+
+.post-x {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--fill);
+  color: var(--ink-4);
+  font-size: 14px;
+}
+
+.post-x:hover {
+  background: var(--fill-2);
+  color: var(--ink-2);
+}
+
+.post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.post-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 99px;
+  padding: 6px 13px;
+  background: var(--fill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.post-meta i {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--ink-5);
+}
+
+.post-note {
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--ink-3);
+  margin-bottom: 18px;
+}
+
+.post-note b {
+  color: var(--ink);
+}
+
+.post-ok,
+.post-err {
+  border-radius: 14px;
+  padding: 12px 15px;
+  font-size: 13px;
+  line-height: 1.65;
+  margin-bottom: 16px;
+}
+
+.post-ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  background: var(--green-bg);
+  color: var(--ink-2);
+}
+
+.post-ok .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+  margin-top: 6px;
+}
+
+.post-err {
+  background: var(--red-bg);
+  color: var(--red-deep);
+}
+
+.post-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.post-primary {
+  height: 50px;
+  border-radius: 15px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: var(--shadow-brand);
+}
+
+.post-second {
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--line-3);
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.post-second:hover:not(:disabled) {
+  border-color: var(--ink-7);
+}
+
+.post-primary:disabled,
+.post-second:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.post-hint {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-5);
+}
+
 .page {
   position: absolute;
   inset: 0;
@@ -689,7 +972,8 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
   box-shadow: var(--shadow-brand);
 }
 
-.danger.full {
+.danger.full,
+.ghost.full {
   width: 100%;
 }
 
