@@ -1,6 +1,9 @@
 <script setup>
 // 底部悬浮导航。调试页只在 VITE_SHOW_WS_DEBUG 打开时出现。
 import { SHOW_WS_DEBUG } from "@/config/features.js";
+import { useEdgeStore } from "@/stores/edge.js";
+
+const edge = useEdgeStore();
 
 const items = [
   { to: "/console/live", label: "上课", icon: "play" },
@@ -14,6 +17,10 @@ const items = [
 <template>
   <nav class="dock">
     <RouterLink v-for="it in items" :key="it.to" :to="it.to" class="tab" active-class="on">
+      <!-- 待绑定人脸数，课中 enrollNeeded 推来时挂在「注册」上 -->
+      <span v-if="it.icon === 'user' && edge.pendingBinds.length" class="badge">
+        {{ edge.pendingBinds.length }}
+      </span>
       <svg v-if="it.icon === 'play'" width="19" height="19" viewBox="0 0 24 24" fill="none">
         <polygon points="7 4 20 12 7 20" fill="currentColor" />
       </svg>
@@ -85,6 +92,7 @@ const items = [
 }
 
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -96,6 +104,20 @@ const items = [
   font-size: 14px;
   font-weight: 600;
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--red);
+  color: #fff;
+  font: 700 11px/18px var(--mono);
+  text-align: center;
 }
 
 .tab:hover {

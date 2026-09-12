@@ -34,6 +34,13 @@ export const useEdgeStore = defineStore("edge", () => {
   const lastPoseAt = ref(0);
   const personCount = ref(0);
   const enrollEvent = ref(null);
+  /**
+   * 待绑定人脸。来源两处：
+   *   - WS enrollNeeded：课中冒出没绑学号的面孔在投篮（edge 按身份 15s 去抖）
+   *   - REST /local/enroll/identities：课前算法 enroll 跑完后主动拉
+   * 按 studentLocalId 去重，绑定成功后从这里摘掉。
+   */
+  const pendingBinds = ref([]);
 
   /* ---------- 连接与错误 ---------- */
   const wsStatus = ref("closed");
@@ -228,6 +235,16 @@ export const useEdgeStore = defineStore("edge", () => {
         enrollEvent.value = payload;
         break;
 
+      case "enrollNeeded": {
+        const id = payload?.studentLocalId;
+        if (!id) break;
+        const i = pendingBinds.value.findIndex((x) => x.studentLocalId === id);
+        // edge 已经按身份去抖了，这里只保留最近一次的动作与时间
+        if (i >= 0) pendingBinds.value[i] = { ...pendingBinds.value[i], ...payload };
+        else pendingBinds.value = [...pendingBinds.value, payload];
+        break;
+      }
+
       default:
         break;
     }
@@ -273,6 +290,29 @@ export const useEdgeStore = defineStore("edge", () => {
     poller = null;
   }
 
+  /* ---------- 待绑定人脸 ---------- */
+
+  /** 课前把算法注册结果并进来，和课中 WS 推的那些合成一张待绑列表 */
+  function mergePendingBinds(people, session) {
+    const add = (people || []).map((p) => ({
+      studentLocalId: p.localId,
+      globalId: p.globalId,
+      hasThumbnail: !!p.hasThumbnail,
+      session,
+    }));
+    const byId = new Map(pendingBinds.value.map((x) => [x.studentLocalId, x]));
+    for (const p of add) byId.set(p.studentLocalId, { ...byId.get(p.studentLocalId), ...p });
+    pendingBinds.value = [...byId.values()];
+  }
+
+  function clearPendingBind(localId) {
+    pendingBinds.value = pendingBinds.value.filter((x) => x.studentLocalId !== localId);
+  }
+
+  function clearAllPendingBinds() {
+    pendingBinds.value = [];
+  }
+
   /* ---------- 课堂控制 ---------- */
 
   async function selectLesson(lessonId) {
@@ -306,6 +346,7 @@ export const useEdgeStore = defineStore("edge", () => {
   return {
     edgeId, lesson, session, cameras, capture, disk, roster, record, services,
     actionFocus, cues, alerts, personCount, enrollEvent,
+    pendingBinds, mergePendingBinds, clearPendingBind, clearAllPendingBinds,
     wsStatus, lastError, now,
     wsLog, wsStats, wsChannel, wsDropped, clearWsLog,
     sessionState, recording, paused, hasLesson,

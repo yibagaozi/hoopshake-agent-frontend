@@ -24,6 +24,121 @@ let poller = null;
 
 const TOTAL_FRAMES = 5;
 
+/* ---------------- 看脸绑学号 ---------------- */
+
+/** bind = 看脸绑学号（算法已注册的人）；capture = 按学号现场采集建档 */
+const mode = ref("bind");
+
+const identities = ref([]);
+const enrollSession = ref("");
+const enrollCamera = ref("");
+const loadingIdentities = ref(false);
+/** localId → 输入框里的学号 */
+const noInput = ref({});
+/** localId → 绑定结果 { studentNo, displayName, matchedInRoster } */
+const bindResult = ref({});
+const binding = ref(false);
+const bindings = ref([]);
+
+/**
+ * 待绑列表 = 算法注册结果 ∪ 课中 WS 推来的 enrollNeeded。
+ * 后者可能压根没注册过（enroll_preview 里没缩略图），只能按 stu_XX 绑。
+ */
+const bindRows = computed(() => {
+  const byId = new Map();
+  for (const p of identities.value) {
+    byId.set(p.localId, {
+      localId: p.localId,
+      globalId: p.globalId,
+      hasThumbnail: !!p.hasThumbnail,
+      session: enrollSession.value,
+      live: false,
+    });
+  }
+  for (const p of edge.pendingBinds) {
+    const prev = byId.get(p.studentLocalId);
+    byId.set(p.studentLocalId, {
+      localId: p.studentLocalId,
+      globalId: p.globalId ?? prev?.globalId,
+      hasThumbnail: prev?.hasThumbnail ?? !!p.hasThumbnail,
+      session: prev?.session ?? p.session ?? enrollSession.value,
+      // 课中推来的标出来，老师知道这人正在场上投篮
+      live: !prev || !!p.actionType,
+      actionType: p.actionType,
+      occurredAt: p.occurredAt,
+    });
+  }
+  return [...byId.values()].filter((r) => !bindResult.value[r.localId]);
+});
+
+const pendingCount = computed(
+  () => bindRows.value.filter((r) => /^\d{10}$/.test((noInput.value[r.localId] || "").trim())).length,
+);
+
+function thumbUrl(row) {
+  return edgeApi.enrollThumbnailUrl(row.session, row.localId);
+}
+
+async function loadIdentities() {
+  loadingIdentities.value = true;
+  try {
+    const res = await edgeApi.getEnrollIdentities();
+    enrollSession.value = res?.session || "";
+    enrollCamera.value = res?.enrollCamera || "";
+    identities.value = res?.people || [];
+    edge.mergePendingBinds(identities.value, enrollSession.value);
+  } catch (e) {
+    problem.value = "error";
+    problemText.value = edgeErrText(e, "拉取注册结果失败");
+  } finally {
+    loadingIdentities.value = false;
+  }
+}
+
+async function loadBindings() {
+  try {
+    const res = await edgeApi.getEnrollBindings();
+    bindings.value = Array.isArray(res) ? res : res?.bindings || [];
+  } catch {
+    // 没有已绑记录时不打扰
+  }
+}
+
+async function submitBind() {
+  const payload = bindRows.value
+    .map((r) => ({
+      localId: r.localId,
+      globalId: r.globalId,
+      studentNo: (noInput.value[r.localId] || "").trim(),
+    }))
+    .filter((b) => /^\d{10}$/.test(b.studentNo));
+  if (!payload.length) return;
+
+  binding.value = true;
+  problem.value = null;
+  try {
+    const res = await edgeApi.bindEnroll(payload);
+    for (const r of Array.isArray(res) ? res : []) {
+      bindResult.value = { ...bindResult.value, [r.localId]: r };
+      edge.clearPendingBind(r.localId);
+      delete noInput.value[r.localId];
+    }
+    await loadBindings();
+    // 绑完名单里的人脸状态会变，顺手刷一次
+    if (edge.lesson?.lessonId) await edge.refreshRoster();
+  } catch (e) {
+    problem.value = "error";
+    problemText.value = edgeErrText(e, "绑定失败");
+  } finally {
+    binding.value = false;
+  }
+}
+
+/** 绑定结果里 matchedInRoster=false 的，单独提出来提醒 */
+const offRoster = computed(() =>
+  Object.values(bindResult.value).filter((r) => r.matchedInRoster === false),
+);
+
 const valid = computed(() => /^\d{10}$/.test(studentNo.value));
 const capturing = computed(() =>
   ["PENDING", "CAPTURING", "UPLOADING", "REGISTERING"].includes(progress.value?.status),
@@ -44,6 +159,11 @@ onMounted(() => {
     studentNo.value = q;
     match();
   }
+});
+
+onMounted(() => {
+  loadIdentities();
+  loadBindings();
 });
 
 onUnmounted(() => clearInterval(poller));
@@ -137,7 +257,91 @@ function reset() {
 </script>
 
 <template>
-  <div class="page">
+  <div class="wrap">
+    <!-- 两种注册路径：课前看脸绑、现场按学号采集 -->
+    <div class="modes">
+      <button class="mode" :class="{ on: mode === 'bind' }" @click="mode = 'bind'">
+        看脸绑学号
+        <span v-if="bindRows.length" class="cnt">{{ bindRows.length }}</span>
+      </button>
+      <button class="mode" :class="{ on: mode === 'capture' }" @click="mode = 'capture'">
+        按学号采集
+      </button>
+    </div>
+
+  <div v-if="mode === 'bind'" class="bind-page">
+    <div class="bind-head">
+      <div>
+        <div class="label">待绑定人脸</div>
+        <div class="sub">
+          算法注册的人脸还没有学号。逐个输学号后一次提交，edge 会把学号和这张脸绑在一起。
+          <template v-if="enrollCamera"> · 注册机位 {{ enrollCamera }}</template>
+        </div>
+      </div>
+      <button class="pull-btn" :disabled="loadingIdentities" @click="loadIdentities">
+        {{ loadingIdentities ? "拉取中…" : "拉取注册结果" }}
+      </button>
+    </div>
+
+    <div v-if="problem === 'error'" class="bind-err">{{ problemText }}</div>
+
+    <div v-if="offRoster.length" class="bind-warn">
+      有 {{ offRoster.length }} 人的学号不在本课名单里（{{ offRoster.map((r) => r.studentNo).join("、") }}），
+      已经绑上，云端入库时会再按学号解析。若是输错，重新绑一次即可覆盖。
+    </div>
+
+    <div v-if="!bindRows.length" class="bind-empty">
+      <div class="be-t">没有待绑定的人脸</div>
+      <div class="be-s">
+        课前请操作员先跑算法 enroll，再点右上角「拉取注册结果」。<br />
+        课中若有没绑学号的面孔在投篮，这里会自动出现。
+      </div>
+    </div>
+
+    <div v-else class="bind-grid">
+      <div v-for="r in bindRows" :key="r.localId" class="bind-card" :class="{ live: r.live }">
+        <div class="face">
+          <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
+          <div v-else class="no-face">
+            <span class="nf-ic">?</span>
+            <span class="nf-t">无缩略图</span>
+          </div>
+          <span v-if="r.live" class="live-tag">场上</span>
+        </div>
+        <div class="bc-id mono">{{ r.localId }}</div>
+        <input
+          v-model="noInput[r.localId]"
+          class="mono bc-input"
+          inputmode="numeric"
+          maxlength="10"
+          placeholder="10 位学号"
+          @keyup.enter="submitBind"
+        />
+      </div>
+    </div>
+
+    <div v-if="bindRows.length" class="bind-foot">
+      <span class="bf-note">
+        学号不在本课名单也能绑，提交后会提示。没有缩略图的面孔只能按 {{ "stu_XX" }} 认，
+        现场确认是谁再填。
+      </span>
+      <button class="bind-btn" :disabled="binding || !pendingCount" @click="submitBind">
+        {{ binding ? "绑定中…" : `绑定 ${pendingCount} 人` }}
+      </button>
+    </div>
+
+    <div v-if="bindings.length" class="bound">
+      <div class="label flat">已绑定 · {{ bindings.length }}</div>
+      <div class="bound-list">
+        <span v-for="b in bindings" :key="b.globalId || b.studentNo" class="bound-chip">
+          <b>{{ b.displayName || b.studentNo }}</b>
+          <i class="mono">{{ b.studentNo }}</i>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div v-else class="page">
     <!-- 左：预览与采集进度 -->
     <section class="preview-col">
       <div class="col-head">
@@ -248,16 +452,314 @@ function reset() {
       </div>
     </section>
   </div>
+  </div>
 </template>
 
 <style scoped>
-.page {
+.wrap {
   position: absolute;
   inset: 0;
   display: flex;
-  padding: 24px 30px 116px;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  padding: 0 30px 116px;
   gap: 22px;
   min-height: 0;
+}
+
+/* ---- 模式切换 ---- */
+.modes {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 20px 30px 16px;
+}
+
+.mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 19px;
+  background: var(--fill);
+  color: var(--ink-3);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mode:hover {
+  background: var(--fill-2);
+}
+
+.mode.on {
+  background: var(--ink);
+  color: #fff;
+}
+
+.mode .cnt {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--red);
+  color: #fff;
+  font: 700 11px/20px var(--mono);
+  text-align: center;
+}
+
+.mode.on .cnt {
+  background: var(--brand);
+}
+
+/* ---- 看脸绑学号 ---- */
+.bind-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 30px 116px;
+  min-height: 0;
+}
+
+.bind-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.bind-head .sub {
+  margin-top: 7px;
+  max-width: 640px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-4);
+}
+
+/* 名字别叫 .ghost —— 本文件下方采集流程已有一个同名类且 flex:1，会把这个按钮拉满 */
+.pull-btn {
+  flex: none;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid var(--line-3);
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pull-btn:hover {
+  border-color: var(--ink-7);
+}
+
+.pull-btn:disabled {
+  opacity: 0.55;
+}
+
+.bind-err,
+.bind-warn {
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-size: 13px;
+  line-height: 1.65;
+  margin-bottom: 16px;
+}
+
+.bind-err {
+  background: var(--red-bg);
+  color: var(--red-deep);
+}
+
+.bind-warn {
+  background: var(--brand-bg);
+  color: var(--brand-deep);
+}
+
+.bind-empty {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 44px 30px;
+  text-align: center;
+}
+
+.be-t {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.be-s {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--ink-4);
+}
+
+.bind-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 16px;
+}
+
+.bind-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 12px;
+}
+
+.bind-card.live {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-line-2);
+}
+
+.face {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--fill);
+  margin-bottom: 10px;
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.no-face {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ink-6);
+}
+
+.nf-ic {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px dashed var(--ink-8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.nf-t {
+  font-size: 12px;
+}
+
+.live-tag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  border-radius: 99px;
+  padding: 3px 9px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bc-id {
+  font-size: 12px;
+  color: var(--ink-4);
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.bc-input {
+  width: 100%;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--line-3);
+  background: var(--fill);
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.bc-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  background: var(--card);
+}
+
+.bind-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.bf-note {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-5);
+  max-width: 560px;
+}
+
+.bind-btn {
+  flex: none;
+  height: 44px;
+  padding: 0 26px;
+  border-radius: 14px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: var(--shadow-brand);
+}
+
+.bind-btn:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.bound {
+  margin-top: 30px;
+}
+
+.bound-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bound-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 99px;
+  padding: 7px 14px;
+  background: var(--green-bg);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.bound-chip b {
+  font-weight: 600;
+}
+
+.bound-chip i {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--ink-4);
 }
 
 .label {
