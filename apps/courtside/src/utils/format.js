@@ -47,11 +47,22 @@ export const actionCn = actionLabel;
 export const actionEn = actionLabelEn;
 export const checkpointCn = checkpointLabel;
 
-/** 检查点名：后端给了就用后端的，没给才查本地表 */
-export const cpName = (label, id) => label || checkpointLabel(id);
+/**
+ * 后端给的 label 优先，但**它等于 id 时不算给了名字**。
+ *
+ * edge 现在 actionFocus 里的 actionLabel 直接回填的就是 actionType（发来的是
+ * "free_throw" 而不是「罚篮」），不挡一下会原样显示到大屏上。
+ */
+function usableLabel(label, id) {
+  const v = String(label ?? "").trim();
+  return v && v !== String(id ?? "") ? v : "";
+}
+
+/** 检查点名：后端给了真名字就用，否则查词表兜底 */
+export const cpName = (label, id) => usableLabel(label, id) || checkpointLabel(id);
 
 /** 动作名：同上 */
-export const actName = (label, type) => label || actionLabel(type);
+export const actName = (label, type) => usableLabel(label, type) || actionLabel(type);
 
 /** 会话状态 → 中文 */
 const SESSIONS = {

@@ -159,9 +159,11 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
           </div>
         </div>
 
-        <div v-if="focus?.displayName" class="pill">
-          <span class="name">{{ focus.displayName }}</span>
-          <span class="ava">{{ initial(focus.displayName) }}</span>
+        <!-- 没绑学号时 displayName 是空的。这时候不该把整块藏掉：
+             「有人在投篮但不知道是谁」正是要老师去补绑的信号 -->
+        <div v-if="focus?.actionType" class="pill">
+          <span class="name">{{ focus.displayName || "未识别" }}</span>
+          <span class="ava">{{ initial(focus.displayName || "?") }}</span>
         </div>
       </div>
 

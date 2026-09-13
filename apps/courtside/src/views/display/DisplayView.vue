@@ -164,9 +164,10 @@ const brief = computed(() => ({
                 <template v-else>等待识别</template>
               </div>
             </div>
-            <div v-if="focus?.displayName" class="who">
-              <span class="nm">{{ focus.displayName }}</span>
-              <span class="ava">{{ initial(focus.displayName) }}</span>
+            <!-- 同操作台：没绑学号时也要显示「未识别」，而不是整块消失 -->
+            <div v-if="focus?.actionType" class="who">
+              <span class="nm">{{ focus.displayName || "未识别" }}</span>
+              <span class="ava">{{ initial(focus.displayName || "?") }}</span>
             </div>
           </div>
 
