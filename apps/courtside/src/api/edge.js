@@ -101,6 +101,9 @@ export const getEnrollStatus = (session) =>
 /**
  * 拉注册结果。session **必填**，就是 start 时传的那个课程 id ——
  * 不传拿不到数据（404 NOT_FOUND）。
+ *
+ * 每个 person：{ localId, globalId, hasThumbnail, bound, boundStudentNo, boundDisplayName }。
+ * 已绑/未绑直接看 bound，不用再拿 /enroll/bindings 交叉查。
  */
 export const getEnrollIdentities = (session) =>
   get(`/enroll/identities?session=${encodeURIComponent(session)}`);
@@ -110,13 +113,19 @@ export const enrollThumbnailUrl = (session, localId) =>
   `${BASE}/enroll/thumbnail?session=${encodeURIComponent(session || "")}&id=${encodeURIComponent(localId)}`;
 
 /**
- * 批量绑定。edge 用名单 find(studentNo) 回填 studentId 并缓存 global_id→学号。
+ * 批量绑定。session 必填且要与拉 identities 用的是同一个（= 课程 id），
+ * 不带会 400 PARAM_INVALID。
+ *
+ * edge 用名单 find(studentNo) 回填 studentId 并缓存 global_id→学号。
  * 回包每条带 matchedInRoster：false 表示学号不在本课名单，仍然绑上，
  * 云端入库时会再按学号解析。
  */
-export const bindEnroll = (bindings) => post("/enroll/bind", { bindings });
+export const bindEnroll = (session, bindings) => post("/enroll/bind", { session, bindings });
 
-/** 当前已持久化的人脸绑定。返回的是 globalId → {studentNo,studentId,displayName} 的 map */
+/**
+ * 当前已持久化的跨课次人脸绑定，globalId → {studentNo,studentId,displayName} 的 map。
+ * 排查用；本课某张脸绑没绑看 identities 的 bound 字段即可，不必调这个。
+ */
 export const getEnrollBindings = () => get("/enroll/bindings");
 
 /* ---------- 录制 ---------- */

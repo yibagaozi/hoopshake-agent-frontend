@@ -100,12 +100,14 @@ const enrollCamera = ref("");
 const loadingIdentities = ref(false);
 /** localId → 输入框里的学号 */
 const noInput = ref({});
-/** localId → 绑定结果 */
-const bindResult = ref({});
+/** 最近一次提交的结果，只用来出「学号不在名单」的提示 */
+const lastBound = ref([]);
 const binding = ref(false);
-const bindings = ref([]);
 
-/** 待绑 = 算法注册结果 ∪ 课中 WS 推来的 enrollNeeded */
+/**
+ * 人脸列表 = 算法注册结果 ∪ 课中 WS 推来的 enrollNeeded。
+ * 已绑的不隐藏：留在原位显示学号和姓名，输错了能直接改再提交一次覆盖。
+ */
 const bindRows = computed(() => {
   const byId = new Map();
   for (const p of identities.value) {
@@ -113,6 +115,9 @@ const bindRows = computed(() => {
       localId: p.localId,
       globalId: p.globalId,
       hasThumbnail: !!p.hasThumbnail,
+      bound: !!p.bound,
+      boundStudentNo: p.boundStudentNo || "",
+      boundDisplayName: p.boundDisplayName || "",
       live: false,
     });
   }
@@ -122,17 +127,27 @@ const bindRows = computed(() => {
       localId: p.studentLocalId,
       globalId: p.globalId ?? prev?.globalId,
       hasThumbnail: prev?.hasThumbnail ?? !!p.hasThumbnail,
+      // enrollNeeded 只对没绑学号的面孔推，所以这些一定是未绑的
+      bound: prev?.bound ?? false,
+      boundStudentNo: prev?.boundStudentNo || "",
+      boundDisplayName: prev?.boundDisplayName || "",
       // 课中推来的标出来，老师知道这人正在场上投篮
       live: !prev || !!p.actionType,
       actionType: p.actionType,
     });
   }
-  return [...byId.values()].filter((r) => !bindResult.value[r.localId]);
+  return [...byId.values()];
 });
 
-const pendingCount = computed(
-  () => bindRows.value.filter((r) => /^\d{10}$/.test((noInput.value[r.localId] || "").trim())).length,
-);
+const unboundCount = computed(() => bindRows.value.filter((r) => !r.bound).length);
+
+/** 待提交 = 填了合法学号，且与已绑的那个不一样（一样就没必要再发一次） */
+function isDirty(r) {
+  const v = (noInput.value[r.localId] || "").trim();
+  return /^\d{10}$/.test(v) && v !== r.boundStudentNo;
+}
+
+const pendingCount = computed(() => bindRows.value.filter(isDirty).length);
 
 const thumbUrl = (row) => edgeApi.enrollThumbnailUrl(session.value, row.localId);
 
@@ -144,7 +159,18 @@ async function loadIdentities() {
     const res = await edgeApi.getEnrollIdentities(session.value);
     enrollCamera.value = res?.enrollCamera || "";
     identities.value = res?.people || [];
-    edge.mergePendingBinds(identities.value, session.value);
+    // 已绑的把学号回填进输入框，老师一眼看到绑的是谁，要改也能直接改
+    for (const p of identities.value) {
+      if (p.bound && p.boundStudentNo && !noInput.value[p.localId]) {
+        noInput.value = { ...noInput.value, [p.localId]: p.boundStudentNo };
+      }
+      // 已经绑上的就不该再留在「待绑」提醒里
+      if (p.bound) edge.clearPendingBind(p.localId);
+    }
+    edge.mergePendingBinds(
+      identities.value.filter((p) => !p.bound),
+      session.value,
+    );
   } catch (e) {
     // NOT_FOUND = 这个 session 没有注册产物，采集没成功或没跑过，不当错误刷屏
     if (edgeErrorName(e) !== "NOT_FOUND") problemText.value = edgeErrText(e, "拉取注册结果失败");
@@ -154,38 +180,22 @@ async function loadIdentities() {
   }
 }
 
-async function loadBindings() {
-  try {
-    const res = await edgeApi.getEnrollBindings();
-    // 回来的是 globalId → {studentNo,studentId,displayName} 的 map，不是数组
-    bindings.value = Array.isArray(res)
-      ? res
-      : Object.entries(res || {}).map(([globalId, v]) => ({ globalId, ...v }));
-  } catch {
-    // 没有已绑记录时不打扰
-  }
-}
-
 async function submitBind() {
-  const payload = bindRows.value
-    .map((r) => ({
-      localId: r.localId,
-      ...(r.globalId ? { globalId: r.globalId } : {}),
-      studentNo: (noInput.value[r.localId] || "").trim(),
-    }))
-    .filter((b) => /^\d{10}$/.test(b.studentNo));
-  if (!payload.length) return;
+  const payload = bindRows.value.filter(isDirty).map((r) => ({
+    localId: r.localId,
+    ...(r.globalId ? { globalId: r.globalId } : {}),
+    studentNo: (noInput.value[r.localId] || "").trim(),
+  }));
+  if (!payload.length || !session.value) return;
 
   binding.value = true;
   problemText.value = "";
   try {
-    const res = await edgeApi.bindEnroll(payload);
-    for (const r of Array.isArray(res) ? res : []) {
-      bindResult.value = { ...bindResult.value, [r.localId]: r };
-      edge.clearPendingBind(r.localId);
-      delete noInput.value[r.localId];
-    }
-    await loadBindings();
+    const res = await edgeApi.bindEnroll(session.value, payload);
+    lastBound.value = Array.isArray(res) ? res : [];
+    for (const r of lastBound.value) edge.clearPendingBind(r.localId);
+    // 绑定状态以服务端为准：重拉一次 identities，bound 字段自己会变过来
+    await loadIdentities();
     if (edge.lesson?.lessonId) await edge.refreshRoster();
   } catch (e) {
     problemText.value =
@@ -197,10 +207,8 @@ async function submitBind() {
   }
 }
 
-/** 绑定结果里学号不在名单的，单独提出来提醒 */
-const offRoster = computed(() =>
-  Object.values(bindResult.value).filter((r) => r.matchedInRoster === false),
-);
+/** 刚绑的这批里学号不在名单的，单独提出来提醒 */
+const offRoster = computed(() => lastBound.value.filter((r) => r.matchedInRoster === false));
 
 /* ---------------- 步骤 ---------------- */
 
@@ -223,14 +231,13 @@ async function bootstrap() {
 watch(session, (id, prev) => {
   if (!id || id === prev) return;
   identities.value = [];
-  bindResult.value = {};
+  lastBound.value = [];
   noInput.value = {};
   bootstrap();
 });
 
 onMounted(() => {
   bootstrap();
-  loadBindings();
   ticker = setInterval(() => (now.value = Date.now()), 1000);
 });
 
@@ -296,11 +303,12 @@ onUnmounted(() => {
               算法会一次性采下全班的人脸，跑完再逐个输学号绑定 —— 不用一个个来。
             </div>
 
+            <!-- 后端的 message 常常就是「采集完成」，和前半句重复就不再拼上 -->
             <div v-if="runState === 'SUCCEEDED' && !running" class="cap-msg ok">
-              采集完成{{ runMsg ? `：${runMsg}` : "" }}。下面是算法注册到的人，逐个输学号即可。
+              采集完成{{ runMsg && runMsg !== "采集完成" ? `：${runMsg}` : "" }}。下面是算法注册到的人，逐个输学号即可。
             </div>
             <div v-else-if="runState === 'FAILED'" class="cap-msg bad">
-              采集失败{{ runMsg ? `：${runMsg}` : "" }}。可以重新开始一轮。
+              采集失败{{ runMsg && runMsg !== "采集失败" ? `：${runMsg}` : "" }}。可以重新开始一轮。
             </div>
             <div v-if="problemText" class="cap-msg bad">{{ problemText }}</div>
 
@@ -339,7 +347,7 @@ onUnmounted(() => {
           </div>
 
           <div v-if="!bindRows.length" class="bind-empty">
-            <div class="be-t">还没有待绑定的人脸</div>
+            <div class="be-t">还没有人脸</div>
             <div class="be-s">
               先完成上面的采集，跑完会自动列出算法注册到的人。<br />
               课中若有没绑学号的面孔在投篮，这里也会自动出现。
@@ -347,7 +355,12 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="bind-grid">
-            <div v-for="r in bindRows" :key="r.localId" class="bind-card" :class="{ live: r.live }">
+            <div
+              v-for="r in bindRows"
+              :key="r.localId"
+              class="bind-card"
+              :class="{ live: r.live, bound: r.bound }"
+            >
               <div class="face">
                 <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
                 <div v-else class="no-face">
@@ -355,11 +368,15 @@ onUnmounted(() => {
                   <span class="nf-t">无缩略图</span>
                 </div>
                 <span v-if="r.live" class="live-tag">场上</span>
+                <span v-else-if="r.bound" class="bound-tag">已绑</span>
               </div>
-              <div class="bc-id mono">{{ r.localId }}</div>
+              <div class="bc-id mono">
+                {{ r.bound && r.boundDisplayName ? r.boundDisplayName : r.localId }}
+              </div>
               <input
                 v-model="noInput[r.localId]"
                 class="mono bc-input"
+                :class="{ dirty: isDirty(r) }"
                 inputmode="numeric"
                 maxlength="10"
                 placeholder="10 位学号"
@@ -370,22 +387,14 @@ onUnmounted(() => {
 
           <div v-if="bindRows.length" class="bind-foot">
             <span class="bf-note">
+              <template v-if="unboundCount">还有 {{ unboundCount }} 张脸没绑。</template>
+              <template v-else>本课的脸都绑好了。</template>
               学号不在本课名单也能绑，提交后会提示。没有缩略图的面孔只能按 stu_XX 认，
-              现场确认是谁再填。
+              现场确认是谁再填；已绑的改掉学号再提交即可覆盖。
             </span>
             <button class="bind-btn" :disabled="binding || !pendingCount" @click="submitBind">
               {{ binding ? "绑定中…" : `绑定 ${pendingCount} 人` }}
             </button>
-          </div>
-
-          <div v-if="bindings.length" class="bound">
-            <div class="label flat">已绑定 · {{ bindings.length }}</div>
-            <div class="bound-list">
-              <span v-for="b in bindings" :key="b.globalId || b.studentNo" class="bound-chip">
-                <b>{{ b.displayName || b.studentNo }}</b>
-                <i class="mono">{{ b.studentNo }}</i>
-              </span>
-            </div>
           </div>
         </template>
       </section>
@@ -556,6 +565,28 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
+.bind-card.bound {
+  background: var(--card-2);
+  border-color: var(--line-2);
+}
+
+.bound-tag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  border-radius: 99px;
+  padding: 3px 9px;
+  background: var(--green);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bc-input.dirty {
+  border-color: var(--brand);
+  background: var(--brand-bg-2);
+}
+
 .live-tag {
   position: absolute;
   left: 8px;
@@ -625,37 +656,10 @@ onUnmounted(() => {
   box-shadow: none;
 }
 
-.bound {
-  margin-top: 30px;
-}
 
-.bound-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
 
-.bound-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 99px;
-  padding: 7px 14px;
-  background: var(--green-bg);
-  color: var(--ink-2);
-  font-size: 13px;
-}
 
-.bound-chip b {
-  font-weight: 600;
-}
 
-.bound-chip i {
-  font-style: normal;
-  font-size: 12px;
-  color: var(--ink-4);
-}
 
 .label {
   font-size: 14px;
