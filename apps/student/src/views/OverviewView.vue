@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  actionLabel,
   errText,
   fmtMonthDay,
   fmtPct,
   nameInitial,
   pctNumber,
+  resolveActionName,
   studentDataApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
@@ -114,7 +114,7 @@ onMounted(async () => {
           <span class="tc-title">命中率趋势</span>
           <span class="tc-more" v-if="trendPoints.length >= 2">近 {{ trendPoints.length }} 课 ↑</span>
         </div>
-        <div class="tc-sub">课后 3D 评分 · {{ actionLabel(trendAction) }}</div>
+        <div class="tc-sub">课后 3D 评分 · {{ resolveActionName(null, trendAction) }}</div>
         <TrendChart :points="trendPoints" :height="112" />
         <div v-if="(data?.actionTypeStats || []).length > 1" class="action-chips">
           <button
@@ -124,7 +124,7 @@ onMounted(async () => {
             :class="{ on: a.actionType === trendAction }"
             @click="loadTrend(a.actionType)"
           >
-            {{ actionLabel(a.actionType) }}
+            {{ resolveActionName(null, a.actionType) }}
           </button>
         </div>
       </div>

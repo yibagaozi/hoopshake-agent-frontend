@@ -1,4 +1,5 @@
 import { http } from './http.js'
+import { actionLabel, checkpointLabel } from './enums.js'
 
 /**
  * 全系统唯一权威词表 GET /api/meta/vocabulary。
@@ -97,11 +98,18 @@ export function isVocabularyFresh() {
 }
 
 /**
- * 拉词表。同一时刻只发一个请求；失败时保留已有的（缓存或兜底），不抛。
+ * 拉词表。
+ *
+ * 一次页面会话只真拉一次：启动时拉过了，各个页面挂载时再调就直接拿现成的
+ * —— 否则进一个页面发一次，白跑好几趟。版本变化靠下次刷新页面重新校验，
+ * 要立刻重拉传 { force: true }。
+ * 同一时刻只发一个请求；失败时保留已有的（缓存或兜底），不抛。
+ *
  * @returns {Promise<object>} 生效的词表
  */
-export function loadVocabulary() {
+export function loadVocabulary({ force = false } = {}) {
   if (inflight) return inflight
+  if (!force && isVocabularyFresh()) return Promise.resolve(vocabulary())
   inflight = (async () => {
     try {
       const v = await http.get('/api/meta/vocabulary')
@@ -119,6 +127,20 @@ export function loadVocabulary() {
   return inflight
 }
 
+/**
+ * 用外部拉到的词表覆盖当前这份。
+ *
+ * 给场边用：它有自己的云端客户端与 token（core 的 http 没配 baseUrl 也拿不到
+ * 那个 token），所以自己拉完调这里塞进来，取值助手就都能用上了。
+ * @returns {boolean} 形状不对会拒绝，返回 false
+ */
+export function setVocabulary(v) {
+  if (!v?.version || !Array.isArray(v.checkpoints)) return false
+  current = { ...v, __fresh: true }
+  writeCache(v)
+  return true
+}
+
 /* ---------------- 取值助手（都接受可选的 vocab，省得调用方传） ---------------- */
 
 export function actionVocab(v = vocabulary()) {
@@ -129,16 +151,16 @@ export function checkpointVocab(v = vocabulary()) {
   return v?.checkpoints || []
 }
 
-/** 动作 id → 中文名，词表里没有就原样返回 id */
+/** 动作 id → 中文名：词表 → 本地兜底表 → 原样 id */
 export function vocabActionLabel(id, v = vocabulary()) {
   if (!id) return '—'
-  return actionVocab(v).find((a) => a.id === id)?.label || id
+  return actionVocab(v).find((a) => a.id === id)?.label || actionLabel(id)
 }
 
-/** 检查点 id → 中文名，词表里没有就原样返回 id */
+/** 检查点 id → 中文名：词表 → 本地兜底表 → 原样 id */
 export function vocabCheckpointLabel(id, v = vocabulary()) {
   if (!id) return '—'
-  return checkpointVocab(v).find((c) => c.id === id)?.label || id
+  return checkpointVocab(v).find((c) => c.id === id)?.label || checkpointLabel(id)
 }
 
 /** 词表里登记过没有。界面靠它区分「有中文名」与「只能显示 id」 */
@@ -167,6 +189,30 @@ export function phasesOf(actionType, v = vocabulary()) {
   const ids = v?.phases?.byActionType?.[actionType] || []
   const labels = v?.phases?.labels || {}
   return ids.map((id) => ({ id, label: labels[id] || id }))
+}
+
+/**
+ * 后端随数据带回来的 label 是否**真的是个名字**。
+ *
+ * edge 的 actionFocus 目前把 actionLabel 回填成了 actionType（发来 "free_throw"
+ * 而不是「罚篮」），这种等于 id 的值不能当名字用，否则会原样显示到界面上。
+ */
+function usableLabel(label, id) {
+  const v = String(label ?? '').trim()
+  return v && v !== String(id ?? '') ? v : ''
+}
+
+/**
+ * 动作名的统一解析顺序：随数据带回的 label → 词表 → 本地兜底表 → 原样 id。
+ * 三端都用这一个，免得同一个 id 在不同页面显示成不同名字。
+ */
+export function resolveActionName(label, id, v = vocabulary()) {
+  return usableLabel(label, id) || vocabActionLabel(id, v)
+}
+
+/** 检查点名，顺序同上 */
+export function resolveCheckpointName(label, id, v = vocabulary()) {
+  return usableLabel(label, id) || vocabCheckpointLabel(id, v)
 }
 
 /** 相位 id → 中文名 */

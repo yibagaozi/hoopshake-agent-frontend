@@ -1,6 +1,6 @@
 // 展示层格式化
 
-import { actionLabel, actionLabelEn, checkpointLabel } from "@hoopshake/core";
+import { actionLabelEn, resolveActionName, resolveCheckpointName } from "@hoopshake/core";
 
 /** 秒 → HH:MM:SS */
 export function clock(seconds) {
@@ -37,32 +37,22 @@ export function initial(name) {
 }
 
 /* ---------- 词表 ----------
-   中文名的**第一来源是 edge**：cue 带 checkpointLabel、actionFocus 带 actionLabel，
-   那是规则引擎按 checkpoints.yaml 直接下发的，和现场算法配置永远一致。
-   @hoopshake/core 里的映射表只做兜底 —— 字段缺失时才用，顺带保证同一个 id
-   在场边和云端（学生端/教师端）显示成同一个名字。
+   中文名统一走 core 的解析器，顺序是：
+     1. 随事件带回的 label（cue 的 checkpointLabel、actionFocus 的 actionLabel）
+     2. GET /api/meta/vocabulary 拉回来的权威词表
+     3. core 里的本地兜底表（断云时用）
+     4. 都没有就原样显示 id
+   第 1 步有个前提：label 等于 id 时不算「给了名字」——
+   edge 目前 actionLabel 回填的就是 actionType，不挡会把 free_throw 显示到大屏上。
    新增兜底条目请改 packages/core/src/enums.js。 */
 
-export const actionCn = actionLabel;
+export const cpName = resolveCheckpointName;
+export const actName = resolveActionName;
+
+/** 只有 id、没有 label 的场合（旧调用点）；内部同样走词表 */
+export const actionCn = (id) => resolveActionName(null, id);
 export const actionEn = actionLabelEn;
-export const checkpointCn = checkpointLabel;
-
-/**
- * 后端给的 label 优先，但**它等于 id 时不算给了名字**。
- *
- * edge 现在 actionFocus 里的 actionLabel 直接回填的就是 actionType（发来的是
- * "free_throw" 而不是「罚篮」），不挡一下会原样显示到大屏上。
- */
-function usableLabel(label, id) {
-  const v = String(label ?? "").trim();
-  return v && v !== String(id ?? "") ? v : "";
-}
-
-/** 检查点名：后端给了真名字就用，否则查词表兜底 */
-export const cpName = (label, id) => usableLabel(label, id) || checkpointLabel(id);
-
-/** 动作名：同上 */
-export const actName = (label, type) => usableLabel(label, type) || actionLabel(type);
+export const checkpointCn = (id) => resolveCheckpointName(null, id);
 
 /** 会话状态 → 中文 */
 const SESSIONS = {

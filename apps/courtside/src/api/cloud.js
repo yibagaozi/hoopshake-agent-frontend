@@ -32,6 +32,9 @@ export const refresh = (refreshToken) =>
 
 export const me = (token) => request(url("/api/auth/me"), { token });
 
+/** 权威词表。任意已登录用户可读，拿回来交给 core 缓存（见 stores/auth.js） */
+export const vocabulary = (token) => request(url("/api/meta/vocabulary"), { token });
+
 /** 本教师名下待上 / 进行中的课 */
 export async function listLessons(token, status = "PLANNED,ONGOING") {
   const data = await request(

@@ -3,8 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   avatarColor,
-  checkpointLabel,
-  renderMarkdown,
   errText,
   fmtDate,
   fmtPct,
@@ -12,6 +10,8 @@ import {
   isNotOpen,
   nameInitial,
   pctNumber,
+  renderMarkdown,
+  resolveCheckpointName,
   summaryApi,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
@@ -137,7 +137,7 @@ onMounted(async () => {
                   <span class="cv" :class="{ hot: b.hot }">{{ b.count }}</span>
                   <div class="cb" :style="{ height: b.hpx + 'px', background: b.color }"></div>
                 </div>
-                <span class="cl">{{ b.label || checkpointLabel(b.checkpointId) }}</span>
+                <span class="cl">{{ resolveCheckpointName(b.label, b.checkpointId) }}</span>
               </div>
             </div>
           </div>
@@ -150,7 +150,7 @@ onMounted(async () => {
               <div v-for="a in data.safetyAlerts" :key="a.feedbackId" class="arow">
                 <span class="ad"></span>
                 <div style="flex: 1">
-                  <div class="at">{{ a.message || checkpointLabel(a.checkpointId) }}</div>
+                  <div class="at">{{ a.message || resolveCheckpointName(null, a.checkpointId) }}</div>
                   <div class="as">{{ a.displayName || '未识别学生' }} · {{ fmtTime(a.occurredAt) }}</div>
                 </div>
               </div>
@@ -183,7 +183,7 @@ onMounted(async () => {
                 <span style="font-size: 15px; font-weight: 600">{{ s.displayName || '未识别' }}</span>
               </div>
               <span style="font: 500 15px/1 var(--mono); color: var(--ink-2)">{{ s.clipCount }}</span>
-              <span style="font-size: 14px; color: var(--ink-2)">{{ s.keyLabel || checkpointLabel(s.keyCheckpointId) }}</span>
+              <span style="font-size: 14px; color: var(--ink-2)">{{ resolveCheckpointName(s.keyLabel, s.keyCheckpointId) }}</span>
               <Spark :values="(s.trend || []).map((p) => p.value)" />
               <span v-if="s.recognized" style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ok)">
                 <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--ok)"></span>已识别

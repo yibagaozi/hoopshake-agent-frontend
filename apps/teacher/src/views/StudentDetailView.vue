@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DOMINANT_HAND,
-  actionLabel,
   avatarColor,
   errText,
   fmtDate,
@@ -11,6 +10,7 @@ import {
   isNotOpen,
   nameInitial,
   pctNumber,
+  resolveActionName,
   teacherStudentApi,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
@@ -152,7 +152,7 @@ onMounted(async () => {
           <div class="arow-list">
             <div v-for="a in actionRows" :key="a.actionType" class="arow">
               <div class="arow-head">
-                <span class="an">{{ actionLabel(a.actionType) }}</span>
+                <span class="an">{{ resolveActionName(null, a.actionType) }}</span>
                 <span class="ar">
                   <template v-if="a.rate !== null">命中率 <b>{{ a.rate }}%</b> · </template>{{ a.clipCount }} 次
                 </span>

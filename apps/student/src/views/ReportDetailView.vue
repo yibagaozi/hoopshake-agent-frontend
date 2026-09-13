@@ -3,8 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   SEVERITY,
-  actionLabel,
-  checkpointLabel,
   errText,
   fmtDate,
   fmtMs,
@@ -12,6 +10,8 @@ import {
   loadVocabulary,
   pageItems,
   phaseLabel,
+  resolveActionName,
+  resolveCheckpointName,
   studentDataApi,
   vocabulary,
 } from '@hoopshake/core'
@@ -73,7 +73,7 @@ const checkpointBars = computed(() => {
         tone = 'mid'
         verdict = '稳定'
       }
-      return { ...c, label: c.label || checkpointLabel(c.id), score, tone, verdict }
+      return { ...c, label: resolveCheckpointName(c.label, c.id), score, tone, verdict }
     })
     .sort((a, b) => b.penalty - a.penalty || b.total - a.total)
     .slice(0, 6)
@@ -221,7 +221,7 @@ onMounted(async () => {
         <div class="clip-grid">
           <button v-for="c in clips" :key="c.clipId" class="clip" @click="openClip(c)">
             <span class="ci">#{{ c.clipIndex }}</span>
-            <span class="ca">{{ actionLabel(c.actionType) }}</span>
+            <span class="ca">{{ resolveActionName(null, c.actionType) }}</span>
             <span
               v-if="c.shotMade !== null && c.shotMade !== undefined"
               class="cm"
@@ -243,9 +243,9 @@ onMounted(async () => {
           <div v-for="f in feedback" :key="f.feedbackId" class="fb-row">
             <span class="fb-tag" :class="f.severity">{{ SEVERITY[f.severity]?.label || f.severity }}</span>
             <div class="fb-mid">
-              <div class="fb-cue">{{ f.cueText || checkpointLabel(f.checkpointId) }}</div>
+              <div class="fb-cue">{{ f.cueText || resolveCheckpointName(null, f.checkpointId) }}</div>
               <div class="fb-sub">
-                {{ actionLabel(f.actionType) }}
+                {{ resolveActionName(null, f.actionType) }}
                 <template v-if="f.timestampMs !== null && f.timestampMs !== undefined"> · {{ fmtMs(f.timestampMs) }}</template>
               </div>
             </div>
@@ -268,7 +268,7 @@ onMounted(async () => {
     <div v-if="clipLoading" class="empty-hint">加载中…</div>
     <template v-else-if="clipDetail">
       <div class="info-card" style="margin-bottom: 14px">
-        <div class="info-row"><span class="k">动作</span><span class="v">{{ actionLabel(clipDetail.actionType) }} · #{{ clipDetail.clipIndex }}</span></div>
+        <div class="info-row"><span class="k">动作</span><span class="v">{{ resolveActionName(null, clipDetail.actionType) }} · #{{ clipDetail.clipIndex }}</span></div>
         <div class="info-row"><span class="k">时间段</span><span class="v" style="font-family: var(--mono)">{{ fmtMs(clipDetail.startMs) }} – {{ fmtMs(clipDetail.endMs) }}</span></div>
         <div class="info-row" v-if="clipDetail.releaseMs !== null && clipDetail.releaseMs !== undefined">
           <span class="k">出手时刻</span><span class="v" style="font-family: var(--mono)">{{ fmtMs(clipDetail.releaseMs) }}</span>

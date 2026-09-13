@@ -2,6 +2,7 @@
 
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { setVocabulary } from "@hoopshake/core";
 import * as cloud from "@/api/cloud.js";
 
 const LS_REFRESH = "hoopshake.refreshToken";
@@ -21,6 +22,20 @@ export const useAuthStore = defineStore("auth", () => {
   const signedIn = computed(() => !!accessToken.value);
   const displayName = computed(() => user.value?.displayName || user.value?.username || "");
 
+  /**
+   * 词表要带 token 才能读，所以登录成功后再拉，拉到交给 core 缓存。
+   * 失败不影响上课 —— core 会退到本地缓存或兜底表，局域网断云时照常用。
+   */
+  async function syncVocabulary() {
+    if (!accessToken.value) return;
+    try {
+      const v = await cloud.vocabulary(accessToken.value);
+      setVocabulary(v);
+    } catch {
+      // 断云或接口不可用时静默退兜底
+    }
+  }
+
   function apply(data, remember) {
     accessToken.value = data.accessToken;
     user.value = data.user;
@@ -34,6 +49,7 @@ export const useAuthStore = defineStore("auth", () => {
     error.value = "";
     try {
       apply(await cloud.login(identifier, password), remember);
+      syncVocabulary();
       return true;
     } catch (e) {
       error.value = e.message;
@@ -69,6 +85,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (!token) return false;
       try {
         apply(await cloud.refresh(token), true);
+        syncVocabulary();
         return true;
       } catch {
         localStorage.removeItem(LS_REFRESH);

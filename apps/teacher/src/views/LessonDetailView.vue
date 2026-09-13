@@ -3,8 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   SEVERITY,
-  actionLabel,
-  checkpointLabel,
+  avatarColor,
   errText,
   fmtDate,
   fmtTime,
@@ -12,7 +11,8 @@ import {
   lessonApi,
   lessonStatusLabel,
   nameInitial,
-  avatarColor,
+  resolveActionName,
+  resolveCheckpointName,
   sessionStatusLabel,
 } from '@hoopshake/core'
 import { toast } from '../toast.js'
@@ -235,7 +235,7 @@ onBeforeUnmount(stopLive)
             <div v-if="!clipBars.length" class="empty-hint" style="padding: 22px 0">暂无动作事件</div>
             <div class="bars">
               <div v-for="b in clipBars" :key="b.action" class="bar-row">
-                <span class="bl">{{ actionLabel(b.action) }}</span>
+                <span class="bl">{{ resolveActionName(null, b.action) }}</span>
                 <div class="track"><div class="fill" :style="{ width: b.pct + '%' }"></div></div>
                 <span class="bv">{{ b.count }}</span>
               </div>
@@ -258,7 +258,7 @@ onBeforeUnmount(stopLive)
                     {{ f.displayName || '未识别学生' }}
                     <span class="sev" :class="f.severity">{{ SEVERITY[f.severity]?.label || f.severity }}</span>
                   </div>
-                  <div class="feed-cue">{{ f.cueText || checkpointLabel(f.checkpointId) || actionLabel(f.actionType) }}</div>
+                  <div class="feed-cue">{{ f.cueText || resolveCheckpointName(null, f.checkpointId) || resolveActionName(null, f.actionType) }}</div>
                 </div>
                 <span class="feed-time">{{ fmtTime(f.occurredAt) }}</span>
               </div>
@@ -278,7 +278,7 @@ onBeforeUnmount(stopLive)
               <div v-for="a in live?.safetyAlerts || []" :key="a.feedbackId" class="alert-row">
                 <span class="ad"></span>
                 <div>
-                  <div class="at">{{ a.message || checkpointLabel(a.checkpointId) }}</div>
+                  <div class="at">{{ a.message || resolveCheckpointName(null, a.checkpointId) }}</div>
                   <div class="as">{{ a.displayName || '未识别学生' }} · {{ fmtTime(a.occurredAt) }}</div>
                 </div>
               </div>
