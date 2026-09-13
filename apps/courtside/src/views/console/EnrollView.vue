@@ -1,6 +1,6 @@
 <script setup>
 // 教师操作台 · 现场注册。整班一次采集（edge 托管），跑完看脸绑学号。
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { edgeErrText, edgeErrorName } from "@/api/http.js";
 import EnrollSkeleton from "@/components/EnrollSkeleton.vue";
 import { useEdgeStore } from "@/stores/edge.js";
@@ -210,10 +210,26 @@ const step = computed(() => {
   return 1;
 });
 
-onMounted(async () => {
+/** 首屏：把这个 session 的采集状态查回来，跑完了就顺手把注册结果拉出来 */
+async function bootstrap() {
+  if (!session.value) return;
   await refreshStatus();
   if (running.value) watchRun();
   else if (runState.value === "SUCCEEDED") await loadIdentities();
+}
+
+// 课程是 ConsoleLayout 连上 edge 之后才拿到的，直接打开注册页时它还是空的。
+// 所以不能只在 onMounted 跑一次 —— 等 lessonId 到位（或中途换课）再跑。
+watch(session, (id, prev) => {
+  if (!id || id === prev) return;
+  identities.value = [];
+  bindResult.value = {};
+  noInput.value = {};
+  bootstrap();
+});
+
+onMounted(() => {
+  bootstrap();
   loadBindings();
   ticker = setInterval(() => (now.value = Date.now()), 1000);
 });
@@ -389,7 +405,9 @@ onUnmounted(() => {
 .page {
   flex: 1;
   display: flex;
-  padding: 0 30px 116px;
+  /* 底部避让放到各列自己身上：右列要内部滚动，避让必须在滚动容器**里面**，
+     否则滚到底时最后一行会被浮动 dock 压住 */
+  padding: 0 30px;
   gap: 22px;
   min-height: 0;
 }
@@ -657,6 +675,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding-bottom: 116px;
 }
 
 .col-head {
@@ -778,7 +797,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   gap: 14px;
+  /* 待绑人脸多起来这列会很长，要能自己滚 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 116px;
+  scrollbar-width: none;
+}
+
+.cap-col::-webkit-scrollbar {
+  display: none;
+}
+
+/* 卡片在滚动容器里默认会被压扁，钉住各自的高度 */
+.cap-col > * {
+  flex: none;
 }
 
 .cap-card {
