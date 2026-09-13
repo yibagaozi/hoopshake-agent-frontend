@@ -26,6 +26,8 @@ export const useEdgeStore = defineStore("edge", () => {
   const record = ref(null);
   /** /local/state 里的服务状态：CV 通道、mediamtx、ffmpeg（edge-frontend-api §1） */
   const services = ref(null);
+  /** GET /local/cv/status 的原样返回 {state, session}，算法在不在线以它为准 */
+  const cv = ref(null);
 
   /* ---------- 实时数据 ---------- */
   const actionFocus = ref(null);
@@ -97,15 +99,41 @@ export const useEdgeStore = defineStore("edge", () => {
     cameras.value.filter((c) => !c.online || !c.signal),
   );
 
+  /** 算法进程状态原文，拿不到就是空串 */
+  const cvState = computed(() => String(cv.value?.state || ""));
+
+  /** 算法当前跑在哪个 session 上 */
+  const cvSession = computed(() => cv.value?.session || "");
+
+  const CV_RUNNING = new Set(["RUNNING", "STARTED", "ACTIVE", "ONLINE", "UP"]);
+  const CV_STOPPED = new Set(["STOPPED", "IDLE", "NONE", "EXITED", "DOWN", "OFFLINE"]);
+
+  /** 状态词认不认识。认不出就原样显示，别硬套成「离线」 */
+  const cvStateKnown = computed(() => {
+    const v = cvState.value.toUpperCase();
+    return CV_RUNNING.has(v) || CV_STOPPED.has(v);
+  });
+
   /**
-   * CV 是否可用。
-   * 以 /local/state 报的通道在线为准；字段缺失时退回骨架帧活性判断
-   * （真算法当前不发实时事件，见 edge-frontend-api §5，那时只有 mock 会有帧）。
+   * 算法是否在跑。
+   * 优先信 /local/cv/status —— 那是权威来源；它拿不到时才退回
+   * /local/state 的通道字段，再退回骨架帧活性。
    */
   const cvAlive = computed(() => {
     void now.value;
+    if (cvStateKnown.value) return CV_RUNNING.has(cvState.value.toUpperCase());
     if (typeof services.value?.cvOnline === "boolean") return services.value.cvOnline;
     return lastPoseAt.value > 0 && Date.now() - lastPoseAt.value < POSE_STALE_MS;
+  });
+
+  /**
+   * 算法跑的 session 和当前选定课程对不上。
+   * 这会让识别结果里的 student_id / global_id 全是 null —— 算法去错 gallery 认人了，
+   * 现象很隐蔽，所以单独标出来。
+   */
+  const cvSessionMismatch = computed(() => {
+    const want = lesson.value?.lessonId;
+    return !!(cvAlive.value && want && cvSession.value && cvSession.value !== want);
   });
 
   /** 骨架帧是否还在推。CV 在线但没帧，说明算法侧没开实时 worker */
@@ -151,6 +179,14 @@ export const useEdgeStore = defineStore("edge", () => {
       roster.value = await edgeApi.getRoster();
     } catch {
       // 未选课时无名单，静默
+    }
+  }
+
+  async function refreshCv() {
+    try {
+      cv.value = await edgeApi.getCvStatus();
+    } catch {
+      // 端点不可用时保持原值，由 /local/state 与骨架帧活性兜底
     }
   }
 
@@ -272,11 +308,13 @@ export const useEdgeStore = defineStore("edge", () => {
     // WS 不覆盖课程 / 磁盘 / 录制 / 名单，这些靠轮询兜底
     poller = setInterval(() => {
       refresh();
+      refreshCv();
       refreshRecord();
       refreshRoster();
     }, 10000);
 
     refresh();
+    refreshCv();
     refreshRecord();
     refreshRoster();
   }
@@ -313,6 +351,25 @@ export const useEdgeStore = defineStore("edge", () => {
     pendingBinds.value = [];
   }
 
+  /* ---------- 算法进程控制 ---------- */
+
+  async function startCv() {
+    const session = lesson.value?.lessonId;
+    if (!session) throw new Error("尚未选课，先选本节课再启动算法");
+    await edgeApi.startCv(session);
+    await refreshCv();
+  }
+
+  async function stopCv() {
+    await edgeApi.stopCv();
+    await refreshCv();
+  }
+
+  async function restartCv() {
+    await edgeApi.restartCv();
+    await refreshCv();
+  }
+
   /* ---------- 课堂控制 ---------- */
 
   async function selectLesson(lessonId) {
@@ -344,7 +401,7 @@ export const useEdgeStore = defineStore("edge", () => {
   }
 
   return {
-    edgeId, lesson, session, cameras, capture, disk, roster, record, services,
+    edgeId, lesson, session, cameras, capture, disk, roster, record, services, cv,
     actionFocus, cues, alerts, personCount, enrollEvent,
     pendingBinds, mergePendingBinds, clearPendingBind, clearAllPendingBinds,
     wsStatus, lastError, now,
@@ -353,6 +410,8 @@ export const useEdgeStore = defineStore("edge", () => {
     elapsedSeconds, recordElapsed,
     camerasHealthy, camerasTotal, camerasDegraded,
     cvAlive, poseAlive, mediamtxReady, ffmpegReady, anchorCamera,
+    cvState, cvSession, cvStateKnown, cvSessionMismatch,
+    refreshCv, startCv, stopCv, restartCv,
     refresh, refreshRoster, refreshRecord,
     connect, disconnect,
     selectLesson, start, pause, resume, stop,

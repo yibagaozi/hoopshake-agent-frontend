@@ -17,6 +17,26 @@ export const getState = () => get("/state");
 export const restartCapture = (camId) =>
   post(`/capture/restart${camId ? `?camId=${encodeURIComponent(camId)}` : ""}`);
 
+/* ---------- 算法进程（CV） ---------- */
+
+/**
+ * 拉起算法。session 就是当前选定课程的 session —— 它决定算法去哪个
+ * gallery 认人，传错了识别结果里 student_id / global_id 会全是 null。
+ */
+export const startCv = (session) =>
+  post(`/cv/start?session=${encodeURIComponent(session)}`);
+
+export const stopCv = () => post("/cv/stop");
+
+/** 以当前 session 重启 */
+export const restartCv = () => post("/cv/restart");
+
+/**
+ * 算法状态 {state, session}。
+ * 这是「通道在不在线」的权威来源，比从 /local/state 里猜字段名靠谱。
+ */
+export const getCvStatus = () => get("/cv/status");
+
 /* ---------- 选课 ---------- */
 
 /**

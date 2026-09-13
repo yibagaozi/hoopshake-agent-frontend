@@ -136,6 +136,18 @@ async function runPost(kind) {
   }
 }
 const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
+
+/* ---------------- 算法进程 ---------------- */
+
+const onStartCv = () => run("cvStart", () => edge.startCv());
+const onStopCv = () => run("cvStop", () => edge.stopCv());
+const onRestartCv = () => run("cvRestart", () => edge.restartCv());
+
+/** 算法状态的中文说法；认不出的状态词原样显示，别硬套 */
+const cvText = computed(() => {
+  if (!edge.cvStateKnown) return edge.cvState || "状态未知";
+  return edge.cvAlive ? "运行中" : "已停止";
+});
 </script>
 
 <template>
@@ -282,17 +294,45 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
         </div>
 
         <div class="cv">
-          <div class="cv-l">
-            <span class="dot" :class="edge.cvAlive ? 'ok' : 'off'" />
-            <span class="cv-ttl">动作识别</span>
+          <div class="cv-head">
+            <div class="cv-l">
+              <span class="dot" :class="edge.cvAlive ? 'ok' : 'off'" />
+              <span class="cv-ttl">动作识别</span>
+            </div>
+            <!-- 进程状态（/local/cv/status）与是否真在推帧分开看：
+                 进程起着但不推帧是两回事，混在一起排查不了 -->
+            <div class="cv-m mono">
+              <span>{{ cvText }}</span>
+              <span>{{ edge.personCount }}<i> 人</i></span>
+              <span>{{ edge.poseAlive ? "帧在推" : "无帧" }}</span>
+            </div>
           </div>
-          <!-- 通道在线（/local/state）与是否真在推帧分开看：
-               真算法当前不发实时事件，只有 mock 会有帧（edge-frontend-api §5） -->
-          <div class="cv-m mono">
-            <span>{{ edge.personCount }}<i> 人</i></span>
-            <span>{{ !edge.cvAlive ? "通道离线" : edge.poseAlive ? "帧在推" : "无帧" }}</span>
+
+          <!-- 算法跑在别的 session 上：它会去错 gallery 认人，
+               识别结果里 student_id 会全是 null，现象很隐蔽 -->
+          <div v-if="edge.cvSessionMismatch" class="cv-warn">
+            算法跑的是另一节课的 session（<span class="mono">{{ edge.cvSession }}</span>），
+            认不出本课的学生。点「以本课重启」切过来。
           </div>
+
           <div class="cv-b">
+            <button
+              v-if="!edge.cvAlive"
+              class="mini go"
+              :disabled="busy === 'cvStart' || !edge.hasLesson"
+              :title="edge.hasLesson ? '' : '先选本节课'"
+              @click="onStartCv"
+            >
+              {{ busy === "cvStart" ? "启动中…" : "启动算法" }}
+            </button>
+            <template v-else>
+              <button class="mini" :disabled="busy === 'cvRestart'" @click="onRestartCv">
+                {{ busy === "cvRestart" ? "重启中…" : edge.cvSessionMismatch ? "以本课重启" : "重启算法" }}
+              </button>
+              <button class="mini" :disabled="busy === 'cvStop'" @click="onStopCv">
+                {{ busy === "cvStop" ? "停止中…" : "停止算法" }}
+              </button>
+            </template>
             <button class="mini" :disabled="busy === 'cap'" @click="onRestartCapture">
               重启采集
             </button>
@@ -981,12 +1021,38 @@ const onRestartCapture = () => run("cap", () => edgeApi.restartCapture());
 
 .cv {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 13px;
   padding: 12px 15px;
+}
+
+.cv-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cv-warn {
+  background: var(--brand-bg);
+  color: var(--brand-deep);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cv-b {
+  display: flex;
+  gap: 8px;
+}
+
+.mini.go {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
 }
 
 .cv-l {
