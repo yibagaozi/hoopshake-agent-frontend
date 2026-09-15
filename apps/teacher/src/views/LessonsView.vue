@@ -88,7 +88,21 @@ const form = ref({
 
 /** 词表接口未开放（50100），提供常用候选，可自定义补充 */
 const ACTION_PRESETS = ['jump_shot', 'layup', 'free_throw', 'dribble', 'pass']
-const CHECKPOINT_PRESETS = ['elbow_alignment', 'release_timing', 'knee_valgus', 'follow_through', 'jump_balance']
+const CHECKPOINT_PRESETS = [
+  'ft.load.knee',
+  'ft.set.elbow',
+  'ft.release.elbow',
+  'ft.release.wrist',
+  'ft.follow.elbow',
+  'js.load.knee',
+  'js.release.elbow',
+  'js.release.wrist',
+  'js.follow.elbow',
+  'lu.takeoff.knee',
+  'lu.finish.elbow',
+  'tt.load.knee',
+  'safety.layup_landing_knee',
+]
 
 const counts = computed(() => {
   const c = { ALL: lessons.value.length, PLANNED: 0, ONGOING: 0, FINISHED: 0 }
