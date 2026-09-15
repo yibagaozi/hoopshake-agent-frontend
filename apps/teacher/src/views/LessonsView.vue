@@ -12,6 +12,7 @@ import {
   lessonStatusLabel,
   pageItems,
   resolveActionName,
+  resolveCheckpointName,
   teacherHelpApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
@@ -347,7 +348,7 @@ onMounted(() => {
             :class="{ on: form.enabledCheckpoints.includes(c) }"
             @click="toggleIn(form.enabledCheckpoints, c)"
           >
-            {{ c }}
+            {{ resolveCheckpointName(null, c) }}
           </button>
         </div>
         <div class="add-row">
