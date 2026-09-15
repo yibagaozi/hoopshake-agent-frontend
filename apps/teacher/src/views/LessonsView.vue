@@ -274,7 +274,8 @@ onMounted(() => {
               </svg>
               <span class="acts">
                 <template v-if="(l.actionTypes || []).length">
-                  {{ l.actionTypes.slice(0, 3).map(actionLabel).join(' · ') }}<template v-if="l.actionTypes.length > 3"> 等</template>
+                  {{ l.actionTypes.slice(0, 3).map(a => resolveActionName(null, a)).join(' · ') }}<template v-if="l.actionTypes.length > 3"> 等</template>
+                  <!-- {{ l.actionTypes.slice(0, 3).map(actionLabel).join(' · ') }}<template v-if="l.actionTypes.length > 3"> 等</template> -->
                 </template>
                 <template v-else>未配置动作</template>
               </span>
@@ -327,8 +328,8 @@ onMounted(() => {
             :class="{ on: form.actionTypes.includes(a) }"
             @click="toggleIn(form.actionTypes, a)"
           >
-            {{ actionLabel(a) }}
-            <!-- {{ resolveActionName(null, a) }} -->
+            <!-- {{ actionLabel(a) }} -->
+            {{ resolveActionName(null, a) }}
           </button>
         </div>
         <div class="add-row">
