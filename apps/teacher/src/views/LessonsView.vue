@@ -11,12 +11,22 @@ import {
   lessonApi,
   lessonStatusLabel,
   pageItems,
-  //resolveActionName,
+  resolveActionName,
   teacherHelpApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
 import { toast } from '../toast.js'
 import Modal from '../components/Modal.vue'
+
+console.log('resolveActionName:', resolveActionName)
+console.log('typeof:', typeof resolveActionName)
+
+onMounted(() => {
+  console.log(
+    'test resolveActionName:',
+    resolveActionName(null, 'free_throw')
+  )
+})
 
 const router = useRouter()
 const auth = useAuthStore()
