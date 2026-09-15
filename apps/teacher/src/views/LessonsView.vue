@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  actionLabel,
   errText,
   fmtDate,
   fmtTime,
@@ -10,7 +11,7 @@ import {
   lessonApi,
   lessonStatusLabel,
   pageItems,
-  resolveActionName,
+  //resolveActionName,
   teacherHelpApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
@@ -316,7 +317,8 @@ onMounted(() => {
             :class="{ on: form.actionTypes.includes(a) }"
             @click="toggleIn(form.actionTypes, a)"
           >
-            {{ resolveActionName(null, a) }}
+            {{ actionLabel(a) }}
+            <!-- {{ resolveActionName(null, a) }} -->
           </button>
         </div>
         <div class="add-row">
