@@ -37,6 +37,34 @@ export const restartCv = () => post("/cv/restart");
  */
 export const getCvStatus = () => get("/cv/status");
 
+/* ---------- 球场标定 ---------- */
+
+/**
+ * 查本课的标定产物。session 就是课程 id，产物按课程隔离在
+ * {work-dir}/data/calibration/live_{课程id}/ 下 —— 镜头动过就该重标，
+ * 所以上一节课的外参不会带到这一节。
+ *
+ * 只读文件系统，编排开关关着也能查。
+ * ready 是上课闸看的那个字段：**只看产物齐不齐，不看跑没跑过**
+ * （进程可能失败、也可能被人中断，退出码 0 但产物不全一样算没标定）。
+ */
+export const getCalibrationStatus = (session) =>
+  get(`/calibration/status?session=${encodeURIComponent(session)}`);
+
+/**
+ * 触发标定。立即回 RUNNING，之后轮询 getCalibrationStatus 直到 SUCCEEDED/FAILED。
+ *
+ * 注意这**不是全自动**：标定含 GUI 标注这一步，要人在算法机前点选控制点。
+ * 这里只是替人省掉敲一行命令，界面上必须把「还要去算法机完成标注」说清楚。
+ *
+ * force=false 且产物已齐时不重复执行，直接回上次结果（免得误触覆盖好产物）；
+ * 镜头动过或换场地才用 force=true。
+ *
+ * 错误码：40918 已有任务在跑、50333 边缘未启用标定、40000 session 非法。
+ */
+export const runCalibration = (session, force = false) =>
+  post("/calibration/run", { session, force });
+
 /* ---------- 选课 ---------- */
 
 /**

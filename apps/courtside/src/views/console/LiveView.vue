@@ -9,7 +9,7 @@ import { DISPLAY_VIEWS } from "@/stores/screen.js";
 import * as edgeApi from "@/api/edge.js";
 import { ALLOW_NO_LESSON } from "@/config/features.js";
 import {
-  actName, actionEn, clock, cpName, initial, shortClock,
+  actName, actionEn, clock, cpName, hhmm, initial, shortClock,
 } from "@/utils/format.js";
 
 const edge = useEdgeStore();
@@ -50,6 +50,59 @@ const startLabel = computed(() => {
 });
 
 const unavailable = computed(() => edge.session?.unavailableCameras || []);
+
+/* ---------------- 球场标定 ---------------- */
+
+/**
+ * 标定产物在不在，决定这节课能不能做真三角化。
+ * 缺产物时 edge 默认不启动 CV（block-cv-when-missing），但**录制照常** ——
+ * 所以这不是「上不了课」，是「这节课没有动作提示」，文案上必须分清，
+ * 否则老师会以为课都上不了。
+ */
+const calibTone = computed(() => {
+  if (!edge.hasLesson) return "off";
+  if (edge.calibRunning) return "warn";
+  if (!edge.calibKnown || edge.calibStale) return "off";
+  return edge.calibReady ? "ok" : "bad";
+});
+
+const calibText = computed(() => {
+  if (!edge.hasLesson) return "未选课";
+  if (edge.calibRunning) return "标定中";
+  if (!edge.calibKnown) return "状态未知";
+  if (edge.calibStale) return "核对中";
+  return edge.calibReady ? "已标定" : "未标定";
+});
+
+/**
+ * 产物最后更新时刻，老师据此判断「这是不是这次摆位之后标的」。
+ * 用 hhmm 而不是 clock —— clock 收的是秒数（课堂计时那种时长），
+ * 传一个时间点进去会算出天文数字。
+ */
+const calibAtText = computed(() => {
+  const v = edge.calibratedAt;
+  if (!v) return "";
+  const t = hhmm(v);
+  return t === "--:--" ? "" : `标于 ${t}`;
+});
+
+/** 上次标定任务失败时，把 edge 给的原因原样带出来，别自己改写 */
+const calibFailMsg = computed(() => {
+  if (edge.calibRunState !== "FAILED") return "";
+  return edge.calibRun?.message || "标定未完成";
+});
+
+/** 开课前的提示条：只在「明确知道没标定」时出，状态未知时不吓人 */
+const calibBlocking = computed(
+  () => edge.hasLesson && edge.calibKnown && !edge.calibStale && !edge.calibReady,
+);
+
+const onCalibrate = (force) =>
+  run("calib", async () => {
+    await edge.runCalibration(force);
+    toast.value =
+      "已在算法机上拉起标定进程。接下来要有人到算法机前完成控制点标注，这一步没法远程替你点。";
+  });
 
 /** 事件的课堂时刻：发生时间减去本课开始时间，与大屏口径一致 */
 function classClock(iso) {
@@ -293,6 +346,75 @@ const cvText = computed(() => {
           </template>
         </div>
 
+        <!-- 球场标定。放在动作识别上面：没有标定就没有三角化，
+             动作识别即便起来了也只会出噪声提示 -->
+        <div class="cv calib">
+          <div class="cv-head">
+            <div class="cv-l">
+              <span class="dot" :class="calibTone" />
+              <span class="cv-ttl">球场标定</span>
+            </div>
+            <div class="cv-m mono">
+              <span>{{ calibText }}</span>
+              <span v-if="calibAtText">{{ calibAtText }}</span>
+            </div>
+          </div>
+
+          <!-- 没标定：说清后果，也说清什么照常 -->
+          <div v-if="calibBlocking" class="cv-warn">
+            本课还没有标定，开课后<b>不会</b>启动动作识别，这节课不出实时提示；
+            <b>录制照常</b>，留档不受影响。
+            <span v-if="edge.calibMissing.length" class="miss mono">
+              缺：{{ edge.calibMissing.join("、") }}
+            </span>
+          </div>
+
+          <div v-else-if="edge.calibStale" class="cv-note">
+            刚换过课，正在按本课重新核对标定产物…
+          </div>
+
+          <div v-else-if="!edge.calibKnown && edge.hasLesson" class="cv-note">
+            拿不到标定状态（算法机没开标定功能，或接口不可用）。开课前请人工确认一下。
+          </div>
+
+          <div v-if="edge.calibRunning" class="cv-note run">
+            标定进程已拉起 —— <b>还要有人到算法机前完成控制点标注</b>，
+            这一步是 GUI 操作，远程点不了。标完这里会自动变成「已标定」。
+          </div>
+
+          <div v-else-if="calibFailMsg" class="cv-warn">
+            上次标定没成：{{ calibFailMsg }}
+          </div>
+
+          <div class="cv-b">
+            <button
+              v-if="!edge.calibReady"
+              class="mini go"
+              :disabled="busy === 'calib' || !edge.hasLesson || edge.calibRunning"
+              :title="edge.hasLesson ? '' : '先选本节课'"
+              @click="onCalibrate(false)"
+            >
+              {{ busy === "calib" ? "拉起中…" : edge.calibRunning ? "标定进行中…" : "开始标定" }}
+            </button>
+            <button
+              v-else
+              class="mini"
+              :disabled="busy === 'calib' || edge.calibRunning"
+              title="镜头动过或换了场地才需要重标"
+              @click="onCalibrate(true)"
+            >
+              {{ busy === "calib" ? "拉起中…" : "重新标定" }}
+            </button>
+            <button
+              class="mini"
+              :disabled="busy === 'calibChk' || !edge.hasLesson"
+              @click="run('calibChk', () => edge.refreshCalibration())"
+            >
+              重新检查
+            </button>
+          </div>
+        </div>
+
         <div class="cv">
           <div class="cv-head">
             <div class="cv-l">
@@ -320,7 +442,13 @@ const cvText = computed(() => {
               v-if="!edge.cvAlive"
               class="mini go"
               :disabled="busy === 'cvStart' || !edge.hasLesson"
-              :title="edge.hasLesson ? '' : '先选本节课'"
+              :title="
+                !edge.hasLesson
+                  ? '先选本节课'
+                  : calibBlocking
+                    ? '本课未标定，算法机可能会拒绝启动'
+                    : ''
+              "
               @click="onStartCv"
             >
               {{ busy === "cvStart" ? "启动中…" : "启动算法" }}
@@ -807,6 +935,13 @@ const cvText = computed(() => {
 .dot.off {
   background: var(--ink-8);
 }
+/* 标定用：bad = 明确没标定（红），warn = 标定进行中（品牌橙） */
+.dot.bad {
+  background: var(--red);
+}
+.dot.warn {
+  background: var(--brand);
+}
 
 /* ---- 右侧 ---- */
 .side {
@@ -1047,6 +1182,32 @@ const cvText = computed(() => {
 .cv-b {
   display: flex;
   gap: 8px;
+}
+
+/* ---- 球场标定 ---- */
+.calib .cv-warn {
+  background: var(--red-bg);
+  color: var(--red-deep);
+}
+.cv-note {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.cv-note.run {
+  background: var(--brand-bg);
+  border-color: transparent;
+  color: var(--brand-deep);
+}
+.miss {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 .mini.go {

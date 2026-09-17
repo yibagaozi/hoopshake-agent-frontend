@@ -1,22 +1,15 @@
 import { defineStore } from 'pinia'
 import { authApi, clearAuth, loadAuth, saveAuth } from '@hoopshake/core'
 
-const PROFILE_KEY = 'hoopshake_student_profile'
-
-function loadProfileExtra() {
-  try {
-    return JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}
-  } catch {
-    return {}
-  }
-}
-
+/**
+ * 曾经这里有个 profileExtra：/api/auth/me 不返回惯用手/身高/腿长，
+ * 只能把 PUT 的返回值缓存在本机。后端 2026-09-17 把这三个字段补进 me 之后
+ * 这份缓存就是负担了（换设备即丢、且会和服务端不一致），整块删掉。
+ */
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     auth: loadAuth(),
     me: null,
-    // 身体档案（me 接口不含这些字段，PUT /api/student/profile 的响应缓存于本地）
-    profileExtra: loadProfileExtra(),
   }),
   getters: {
     isLoggedIn: (s) => !!s.auth?.accessToken,
@@ -51,19 +44,6 @@ export const useAuthStore = defineStore('auth', {
       }
       return this.me
     },
-    setProfileExtra(data) {
-      const extra = {
-        dominantHand: data?.dominantHand ?? null,
-        heightCm: data?.heightCm ?? null,
-        legLengthCm: data?.legLengthCm ?? null,
-      }
-      this.profileExtra = extra
-      try {
-        localStorage.setItem(PROFILE_KEY, JSON.stringify(extra))
-      } catch {
-        /* ignore */
-      }
-    },
     async logout() {
       const rt = this.auth?.refreshToken
       try {
@@ -77,6 +57,12 @@ export const useAuthStore = defineStore('auth', {
       clearAuth()
       this.auth = null
       this.me = null
+      // 旧版本留下的本地档案缓存，顺手清掉
+      try {
+        localStorage.removeItem('hoopshake_student_profile')
+      } catch {
+        /* ignore */
+      }
     },
   },
 })

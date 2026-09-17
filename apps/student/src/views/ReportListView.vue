@@ -7,19 +7,23 @@ import TabBar from '../components/TabBar.vue'
 
 const router = useRouter()
 const loading = ref(true)
+/** 拉不到时别显示「还没有课堂记录」——那会让练过一学期的学生以为自己从没来过 */
+const loadErr = ref('')
 const items = ref([])
 const page = ref(0)
 const hasNext = ref(false)
 
 async function load(p = 0) {
   loading.value = true
+  if (p === 0) loadErr.value = ''
   try {
     const res = normalizePage(await studentDataApi.sessions({ page: p, size: 20 }))
     items.value = p === 0 ? res.content : [...items.value, ...res.content]
     page.value = res.page
     hasNext.value = res.hasNext
   } catch (err) {
-    toast.err(errText(err, '加载训练记录失败'))
+    if (p === 0) loadErr.value = errText(err, '加载训练记录失败')
+    else toast.err(errText(err))
   } finally {
     loading.value = false
   }
@@ -37,6 +41,12 @@ onMounted(() => load(0))
     <template v-if="loading && !items.length">
       <div v-for="i in 4" :key="i" class="card row"><div class="skeleton" style="height: 44px; flex: 1"></div></div>
     </template>
+
+    <div v-else-if="loadErr" class="load-err">
+      <div class="le-t">没能加载训练记录</div>
+      <div class="le-s">{{ loadErr }}</div>
+      <button class="le-btn" @click="load(0)">重试</button>
+    </div>
 
     <div v-else-if="!items.length" class="empty-hint">还没有课堂记录，上完课就能看到报告啦</div>
 
@@ -70,6 +80,31 @@ onMounted(() => load(0))
 </template>
 
 <style scoped>
+.load-err {
+  background: #fff;
+  border-radius: 22px;
+  padding: 26px 20px;
+  text-align: center;
+}
+.le-t {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+.le-s {
+  font-size: 13px;
+  color: var(--gray);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.le-btn {
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 14px;
+  padding: 11px 30px;
+}
 .page-pad {
   padding: calc(env(safe-area-inset-top, 0px) + 20px) 22px 0;
 }

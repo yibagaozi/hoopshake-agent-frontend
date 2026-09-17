@@ -15,6 +15,8 @@ const routes = [
   },
   { path: '/profile', name: 'profile', component: () => import('./views/ProfileView.vue'), meta: { tab: 'me' } },
   { path: '/profile/edit', name: 'profile-edit', component: () => import('./views/ProfileEditView.vue') },
+  { path: '/profile/password', name: 'password', component: () => import('./views/PasswordView.vue') },
+  { path: '/help', name: 'help', component: () => import('./views/HelpListView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 

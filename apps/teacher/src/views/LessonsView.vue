@@ -13,6 +13,7 @@ import {
   pageItems,
   resolveActionName,
   resolveCheckpointName,
+  helpIsOpen,
   teacherHelpApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
@@ -41,30 +42,50 @@ const keyword = ref('')
 const helpRequests = ref([])
 const handling = ref(null)
 
-/** 已办结的状态名。status 枚举后端还没给，先按常见几种认，认不出就当未处理显示 */
-const DONE_STATUS = new Set(['HANDLED', 'RESOLVED', 'CLOSED', 'DONE', 'REPLIED'])
+/*
+ * 状态枚举后端已给死：PENDING / VIEWED / RESOLVED / DISMISSED，就这四个。
+ * 之前前端猜的 HANDLED / CLOSED / DONE / REPLIED 都不存在，那套兼容分支删了。
+ * 待处理 = PENDING 或 VIEWED，由 core 的 helpIsOpen 判。
+ */
+const replyTarget = ref(null)
+const replyText = ref('')
+
+/** 工单 id：学生视角字段叫 id，教师视角历史上叫 requestId，两个都认 */
+const rid = (r) => r?.requestId || r?.id
 
 async function loadHelpRequests() {
   try {
-    // 不传 status（= 全部）。待处理的枚举名还没确认，传错值会静默返回空列表，
-    // 那比多显示几条已办的更难发现，所以筛选放到前端做
+    // 仍不传 status（= 全部）在前端筛：后端若以后扩了枚举，这里不会因为
+    // 传了一个过时的值而静默返回空列表
     const list = pageItems(await teacherHelpApi.list({ size: 20 }))
-    helpRequests.value = list.filter((r) => !r.status || !DONE_STATUS.has(String(r.status).toUpperCase()))
+    helpRequests.value = list.filter((r) => !r.status || helpIsOpen(String(r.status).toUpperCase()))
   } catch (err) {
     toast.err(errText(err, '加载学生求助失败'))
   }
 }
 
-async function handleHelp(r) {
-  const reply = prompt(`回复「${r.studentName || r.studentNo || '学生'}」的求助`, '下次课重点帮你纠正')
-  if (reply === null) return
-  handling.value = r.requestId
+function askReply(r) {
+  replyTarget.value = r
+  replyText.value = '下次课重点帮你纠正'
+}
+
+/**
+ * handle 的 status 是**必填**的（后端已给字段表），只发 reply 会被 400 打回。
+ * @param {'RESOLVED'|'DISMISSED'} status
+ */
+async function submitHelp(status) {
+  const r = replyTarget.value
+  if (!r) return
+  const id = rid(r)
+  handling.value = id
+  replyTarget.value = null
   try {
-    // 只发 reply：handle 端点的请求体后端还没给字段表，多塞一个猜的 status
-    // 可能被参数校验挡掉（40000），少发比多发安全
-    await teacherHelpApi.handle(r.requestId, { reply: reply.trim() })
-    helpRequests.value = helpRequests.value.filter((x) => x.requestId !== r.requestId)
-    toast.ok('已回复')
+    await teacherHelpApi.handle(id, {
+      status,
+      reply: status === 'RESOLVED' ? replyText.value.trim() : '',
+    })
+    helpRequests.value = helpRequests.value.filter((x) => rid(x) !== id)
+    toast.ok(status === 'RESOLVED' ? '已回复学生' : '已忽略')
   } catch (err) {
     toast.err(errText(err, '处理失败'))
   } finally {
@@ -230,13 +251,13 @@ onMounted(() => {
           <span class="help-badge">{{ helpRequests.length }}</span>
           学生求助待处理
         </div>
-        <div v-for="r in helpRequests" :key="r.requestId" class="help-row">
+        <div v-for="r in helpRequests" :key="rid(r)" class="help-row">
           <div class="help-mid">
             <div class="help-who">{{ r.studentName || r.studentNo || '学生' }}</div>
             <div class="help-q">{{ r.question }}</div>
           </div>
-          <button class="btn sm" :disabled="handling === r.requestId" @click="handleHelp(r)">
-            {{ handling === r.requestId ? '处理中…' : '回复' }}
+          <button class="btn sm" :disabled="handling === rid(r)" @click="askReply(r)">
+            {{ handling === rid(r) ? '处理中…' : '处理' }}
           </button>
         </div>
       </div>
@@ -376,9 +397,39 @@ onMounted(() => {
       <button class="btn primary" :disabled="creating" @click="create">{{ creating ? '创建中…' : '创建课程' }}</button>
     </template>
   </Modal>
+
+  <!-- 回复学生求助。status 是必填的，所以这里给两个明确出口：
+       回复并解决 = RESOLVED，忽略 = DISMISSED -->
+  <Modal
+    :open="!!replyTarget"
+    :title="`回复 ${replyTarget?.studentName || replyTarget?.studentNo || '学生'}`"
+    @close="replyTarget = null"
+  >
+    <div class="rp-q">{{ replyTarget?.question }}</div>
+    <div class="fld">
+      <label>回复内容</label>
+      <textarea v-model="replyText" class="txt" rows="4" maxlength="4000" placeholder="学生会在「我的求助」里看到这段话"></textarea>
+    </div>
+    <template #foot>
+      <button class="btn" @click="submitHelp('DISMISSED')">忽略这条</button>
+      <button class="btn primary" :disabled="!replyText.trim()" @click="submitHelp('RESOLVED')">
+        回复并标记已解决
+      </button>
+    </template>
+  </Modal>
 </template>
 
 <style scoped>
+.rp-q {
+  background: var(--fill-2);
+  border-radius: 14px;
+  padding: 13px 15px;
+  font-size: 14px;
+  color: var(--ink-2);
+  line-height: 1.65;
+  margin-bottom: 18px;
+  word-break: break-word;
+}
 .help-box {
   padding: 18px 22px;
   margin-bottom: 18px;

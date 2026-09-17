@@ -28,6 +28,12 @@ export const teacherStudentApi = {
   detail: (studentId) => http.get(`/api/teacher/students/${studentId}`),
   update: (studentId, payload) => http.put(`/api/teacher/students/${studentId}`, payload),
   stats: (studentId) => http.get(`/api/teacher/students/${studentId}/stats`),
+  /**
+   * 把学生密码重置回学校统一的初始密码（配置项 hoopshake.student.initial-password，
+   * 留空则是学号本身）。**不回明文** —— 所以界面上别做「复制新密码」那种交互，
+   * 只能提示教师按学校约定告知。账号保持 ACTIVE，不退回待激活。
+   */
+  resetPassword: (studentId) => http.post(`/api/teacher/students/${studentId}/password/reset`),
   /** 🚧 50100 */
   reidCorrection: (studentId, payload) =>
     http.post(`/api/teacher/students/${studentId}/reid/corrections`, payload),
@@ -47,8 +53,12 @@ export const summaryApi = {
 export const teacherHelpApi = {
   list: ({ status, page = 0, size = 20 } = {}) =>
     http.get('/api/teacher/help-requests', { status, page, size }),
-  handle: (requestId, payload) =>
-    http.post(`/api/teacher/help-requests/${requestId}/handle`, payload),
+  /** status 必填（四选一），reply 可空、≤4000 字。只发 reply 会被 400 打回 */
+  handle: (requestId, { status, reply } = {}) =>
+    http.post(`/api/teacher/help-requests/${requestId}/handle`, {
+      status,
+      ...(reply ? { reply } : {}),
+    }),
 }
 
 /** §7 备课工作台 /api/teacher/plan（🚧 全部 50100，前端灰置） */

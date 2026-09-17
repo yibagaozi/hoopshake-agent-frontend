@@ -65,7 +65,8 @@ async function submit() {
 
     <!-- 激活入口只保留页脚那一处，这里不再重复 -->
     <div class="links-row">
-      <a @click.prevent="toast('请联系老师重置密码')">忘记密码？</a>
+      <!-- 重置走教师侧（老师把密码重置回学校统一的初始密码），学生端没有自助入口 -->
+      <a @click.prevent="toast('找任课老师把密码重置回初始密码，再用初始密码登录', 'info', 4200)">忘记密码？</a>
     </div>
 
     <button class="btn-primary" :disabled="loading" @click="submit">

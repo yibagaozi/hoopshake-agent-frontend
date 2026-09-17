@@ -4,10 +4,10 @@ import { useRouter } from 'vue-router'
 import {
   errText,
   fmtMonthDay,
-  fmtPct,
   nameInitial,
   pctNumber,
   resolveActionName,
+  resolveCheckpointName,
   studentDataApi,
 } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
@@ -19,9 +19,12 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const loading = ref(true)
+/** 接口失败时别渲染成「0 次训练 / 还没有记录」—— 那等于告诉学生他从没来过 */
+const loadErr = ref('')
 const data = ref(null)
 const trendPoints = ref([])
 const trendAction = ref('')
+const trendErr = ref(false)
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -32,32 +35,83 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
+const focus = computed(() => data.value?.focusCheckpoint || null)
+
 const focusProgress = computed(() => {
-  const p = data.value?.focusCheckpoint?.progress
+  const p = focus.value?.progress
   return p === null || p === undefined ? 0 : Math.max(0, Math.min(100, pctNumber(p) ?? 0))
+})
+
+/**
+ * 检查点中文名。后端现在保证 label 要么是中文、要么是 null（不会再回填成 id），
+ * 但仍走统一的解析链：label → 词表 → 本地兜底 → 原样 id。
+ */
+const focusName = computed(() =>
+  focus.value ? resolveCheckpointName(focus.value.label, focus.value.checkpointId) : ''
+)
+
+/**
+ * 「较上周」那一行。
+ * improvementPct 的语义后端定死了：null = 没有上一次数据、不可比，0 = 确实持平。
+ * 之前 null 被渲染成「较上周改善 +0% · 继续保持」，是凭空给结论；
+ * 而且不管正负都说「改善」，跌了也这么写。
+ */
+const focusDelta = computed(() => {
+  const v = focus.value?.improvementPct
+  if (v === null || v === undefined || Number.isNaN(Number(v))) {
+    return { text: '暂无对比 · 这是第一次练它', tone: 'flat' }
+  }
+  const n = Math.round(Number(v) * 10) / 10
+  if (n === 0) return { text: '与上次持平', tone: 'flat' }
+  if (n > 0) return { text: `较上次进步 +${n}% · 继续保持`, tone: 'up' }
+  return { text: `较上次退步 ${n}% · 这节课重点练它`, tone: 'down' }
+})
+
+/**
+ * 趋势方向。原来这里写死了个 ↑，线在跌也显示涨。
+ * 只比首尾两点，中间的起伏不算 —— 学生要的是「这几节课整体在变好还是变差」。
+ */
+const trendDir = computed(() => {
+  const pts = trendPoints.value.filter((p) => p.value !== null && p.value !== undefined)
+  if (pts.length < 2) return null
+  const d = Number(pts[pts.length - 1].value) - Number(pts[0].value)
+  if (Math.abs(d) < 1) return { arrow: '→', tone: 'flat', text: '基本持平' }
+  return d > 0
+    ? { arrow: '↑', tone: 'up', text: `较首节 +${Math.round(d)}%` }
+    : { arrow: '↓', tone: 'down', text: `较首节 ${Math.round(d)}%` }
 })
 
 async function loadTrend(actionType) {
   trendAction.value = actionType
+  trendErr.value = false
   try {
     const t = await studentDataApi.trend({ actionType, metric: 'made_rate', limit: 8 })
     trendPoints.value = (t?.points || []).map((p) => ({ value: pctNumber(p.value), label: p.recordedAt }))
   } catch {
+    // 趋势拉不到不该拖垮整页，但也别装成「暂无趋势数据」
     trendPoints.value = []
+    trendErr.value = true
   }
 }
 
-onMounted(async () => {
-  auth.fetchMe()
+async function load() {
+  loading.value = true
+  loadErr.value = ''
   try {
     data.value = await studentDataApi.overview()
     const firstAction = data.value?.actionTypeStats?.[0]?.actionType
     if (firstAction) loadTrend(firstAction)
   } catch (err) {
-    toast.err(errText(err, '加载训练概览失败'))
+    data.value = null
+    loadErr.value = errText(err, '加载训练概览失败')
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  auth.fetchMe()
+  load()
 })
 </script>
 
@@ -86,6 +140,13 @@ onMounted(async () => {
       </div>
     </template>
 
+    <!-- 接口挂了：明说拉不到，不要渲染成一份全 0 的「你还没训练过」 -->
+    <div v-else-if="loadErr" class="load-err">
+      <div class="le-t">没能加载你的训练数据</div>
+      <div class="le-s">{{ loadErr }}</div>
+      <button class="le-btn" @click="load">重试</button>
+    </div>
+
     <template v-else>
       <!-- 本周三格 -->
       <div class="tiles">
@@ -112,10 +173,16 @@ onMounted(async () => {
       <div class="card trend-card">
         <div class="tc-head">
           <span class="tc-title">命中率趋势</span>
-          <span class="tc-more" v-if="trendPoints.length >= 2">近 {{ trendPoints.length }} 课 ↑</span>
+          <span v-if="trendDir" class="tc-more" :class="trendDir.tone">
+            近 {{ trendPoints.length }} 课 {{ trendDir.arrow }}
+          </span>
         </div>
-        <div class="tc-sub">课后 3D 评分 · {{ resolveActionName(null, trendAction) }}</div>
-        <TrendChart :points="trendPoints" :height="112" />
+        <div class="tc-sub">
+          课后 3D 评分 · {{ resolveActionName(null, trendAction) }}
+          <template v-if="trendDir"> · {{ trendDir.text }}</template>
+        </div>
+        <div v-if="trendErr" class="tc-err">趋势没加载出来，下拉刷新或稍后再看</div>
+        <TrendChart v-else :points="trendPoints" :height="112" />
         <div v-if="(data?.actionTypeStats || []).length > 1" class="action-chips">
           <button
             v-for="a in data.actionTypeStats"
@@ -130,17 +197,13 @@ onMounted(async () => {
       </div>
 
       <!-- 本阶段重点 -->
-      <div v-if="data?.focusCheckpoint" class="focus-card">
+      <div v-if="focus" class="focus-card">
         <div class="fc-cap">本阶段重点</div>
-        <div class="fc-title">{{ data.focusCheckpoint.label }}</div>
+        <div class="fc-title">{{ focusName }}</div>
         <div class="fc-track">
           <div class="fc-fill" :style="{ width: focusProgress + '%' }"></div>
         </div>
-        <div class="fc-note">
-          较上周改善
-          <span class="fc-pct">{{ (data.focusCheckpoint.improvementPct >= 0 ? '+' : '') + Math.round(data.focusCheckpoint.improvementPct) }}%</span>
-          · 继续保持
-        </div>
+        <div class="fc-note" :class="focusDelta.tone">{{ focusDelta.text }}</div>
       </div>
 
       <!-- 最近课堂 -->
@@ -214,6 +277,39 @@ onMounted(async () => {
   margin-bottom: 16px;
   cursor: pointer;
 }
+.load-err {
+  background: #fff;
+  border-radius: 22px;
+  padding: 26px 20px;
+  text-align: center;
+}
+.le-t {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+.le-s {
+  font-size: 13px;
+  color: var(--gray);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.le-btn {
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 14px;
+  padding: 11px 30px;
+}
+.tc-err {
+  height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-2);
+  font-size: 13px;
+}
 .tiles {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -256,7 +352,17 @@ onMounted(async () => {
 .tc-more {
   font-size: 13px;
   font-weight: 600;
+  color: var(--gray-2);
+}
+/* 涨绿、跌红、平灰。原来无论涨跌都是绿色配一个写死的 ↑ */
+.tc-more.up {
   color: var(--ok);
+}
+.tc-more.down {
+  color: var(--danger);
+}
+.tc-more.flat {
+  color: var(--gray-2);
 }
 .tc-sub {
   font-size: 13px;
@@ -316,8 +422,13 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--dark-muted);
 }
-.fc-pct {
+/* 深色卡片上的涨跌色，灰的那档保持 dark-muted */
+.fc-note.up {
   color: var(--accent-light);
+  font-weight: 600;
+}
+.fc-note.down {
+  color: #ff8f8f;
   font-weight: 600;
 }
 .sec-title {

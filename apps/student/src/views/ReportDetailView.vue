@@ -6,9 +6,8 @@ import {
   errText,
   fmtDate,
   fmtMs,
-  isNotOpen,
   loadVocabulary,
-  pageItems,
+  normalizePage,
   phaseLabel,
   resolveActionName,
   resolveCheckpointName,
@@ -22,9 +21,12 @@ const props = defineProps({ sessionId: { type: String, required: true } })
 const router = useRouter()
 
 const loading = ref(true)
+const loadErr = ref('')
 const detail = ref(null)
 const clips = ref([])
 const feedback = ref([])
+/** 真的全拉到了没有。没拉全的话命中率这些统计都不能当数 */
+const complete = ref(true)
 const clipSheet = ref(false)
 const clipDetail = ref(null)
 const clipLoading = ref(false)
@@ -106,32 +108,79 @@ async function openClip(c) {
   }
 }
 
-async function exportPdf() {
-  try {
-    await studentDataApi.exportReport(props.sessionId)
-    toast.ok('报告导出任务已提交')
-  } catch (err) {
-    toast.err(isNotOpen(err) ? 'PDF 报告导出暂未开放，敬请期待' : errText(err))
-  }
+/**
+ * PDF 导出后端本轮没做（接口返 50100，且没有取件的那半截契约）。
+ * 与其让人点一颗满屏主按钮再被告知「暂未开放」，不如按钮就摆在那儿灰着，
+ * 一眼看得出还没开。接口开放时把 disabled 去掉、接上取件即可。
+ */
+const EXPORT_READY = false
+
+function exportPdf() {
+  toast('PDF 报告还在做，先看这页的数据')
 }
 
 const vocab = ref(vocabulary())
 
-onMounted(async () => {
-  loadVocabulary().then((v) => (vocab.value = v))
+/** 后端分页 size 上限是 100（超出按 100 截断），所以只能按 100 一页一页翻 */
+const PAGE_SIZE = 100
+/** 保险丝：一节课再长也不该有这么多，防止后端分页字段异常时无限翻 */
+const MAX_PAGES = 30
+
+/**
+ * 把一个分页端点整个拉完。
+ *
+ * 原来这里只拉第 0 页 —— 一节课超过 100 条反馈时，命中率、检查点表现、
+ * 关键改进全建在被截断的数据上，而顶上的「出手 N」取的又是 detail.clipCount，
+ * 同屏两个数字分母不同。
+ *
+ * @returns {{ items: any[], complete: boolean }}
+ */
+async function fetchAll(fn) {
+  const items = []
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = normalizePage(await fn(page))
+    items.push(...res.content)
+    if (!res.hasNext || !res.content.length) return { items, complete: true }
+  }
+  return { items, complete: false }
+}
+
+async function load() {
+  loading.value = true
+  loadErr.value = ''
   try {
     detail.value = await studentDataApi.sessionDetail(props.sessionId)
-    const [cRes, fRes] = await Promise.all([
-      studentDataApi.clips(props.sessionId, { size: 100 }),
-      studentDataApi.feedback(props.sessionId, { size: 100 }),
+    const [c, f] = await Promise.all([
+      fetchAll((page) => studentDataApi.clips(props.sessionId, { page, size: PAGE_SIZE })),
+      fetchAll((page) => studentDataApi.feedback(props.sessionId, { page, size: PAGE_SIZE })),
     ])
-    clips.value = pageItems(cRes)
-    feedback.value = pageItems(fRes).sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt))
+    clips.value = c.items
+    feedback.value = f.items.sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt))
+    complete.value = c.complete && f.complete && countsAgree()
   } catch (err) {
-    toast.err(errText(err, '加载报告失败'))
+    detail.value = null
+    loadErr.value = errText(err, '加载报告失败')
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 跟后端给的总数对一下。对不上就说明这页的统计不是全量，
+ * 宁可在界面上标一句，也别让学生把一个算错的命中率当真。
+ */
+function countsAgree() {
+  const d = detail.value
+  if (!d) return true
+  const okClips = d.clipCount === null || d.clipCount === undefined || d.clipCount === clips.value.length
+  const okFb =
+    d.feedbackCount === null || d.feedbackCount === undefined || d.feedbackCount === feedback.value.length
+  return okClips && okFb
+}
+
+onMounted(() => {
+  loadVocabulary().then((v) => (vocab.value = v))
+  load()
 })
 </script>
 
@@ -145,7 +194,7 @@ onMounted(async () => {
         <div class="sub">{{ detail?.lessonTitle || '自由训练' }} · {{ fmtDate(detail?.recordedAt) }}</div>
       </div>
     </div>
-    <button class="dl-btn" @click="exportPdf" title="导出 PDF">
+    <button class="dl-btn" :disabled="!EXPORT_READY" @click="exportPdf" title="PDF 报告暂未开放">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
         <path d="M12 15V4M12 4L8 8M12 4l4 4" stroke="#E8551A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         <path d="M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" stroke="#E8551A" stroke-width="2" stroke-linecap="round" />
@@ -159,11 +208,23 @@ onMounted(async () => {
       <div class="skeleton" style="height: 220px; border-radius: 26px"></div>
     </template>
 
+    <div v-else-if="loadErr" class="load-err">
+      <div class="le-t">没能加载这节课的报告</div>
+      <div class="le-s">{{ loadErr }}</div>
+      <button class="le-btn" @click="load">重试</button>
+    </div>
+
     <template v-else>
       <!-- 深色统计条 -->
+      <div v-if="!complete" class="partial-tip">
+        这节课的数据没取全，下面的命中率与检查点统计仅供参考。下拉重进可重试。
+      </div>
+
       <div class="stat-row">
         <div class="stat">
-          <div class="num">{{ detail?.clipCount ?? clips.length }}</div>
+          <!-- 用实际拉到的条数，与命中率同源。取 detail.clipCount 会出现
+               「出手 120 / 命中率按 100 条算」这种同屏不同分母 -->
+          <div class="num">{{ clips.length || detail?.clipCount || 0 }}</div>
           <div class="lab">出手</div>
         </div>
         <div class="stat">
@@ -258,8 +319,13 @@ onMounted(async () => {
 
   <!-- 底部按钮 -->
   <div class="bottom-act">
-    <button class="btn-primary" style="height: 52px; font-size: 16px" @click="exportPdf">
-      生成 PDF 报告
+    <button
+      class="btn-primary"
+      style="height: 52px; font-size: 16px"
+      :disabled="!EXPORT_READY"
+      @click="exportPdf"
+    >
+      {{ EXPORT_READY ? '生成 PDF 报告' : '生成 PDF 报告 · 即将开放' }}
     </button>
   </div>
 
@@ -320,6 +386,12 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--gray);
   margin-top: 2px;
+}
+.dl-btn:disabled,
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 .dl-btn {
   width: 40px;
@@ -564,6 +636,41 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--gray-2);
   margin-top: 2px;
+}
+.load-err {
+  background: #fff;
+  border-radius: 26px;
+  padding: 30px 22px;
+  text-align: center;
+}
+.le-t {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+.le-s {
+  font-size: 13px;
+  color: var(--gray);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.le-btn {
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 14px;
+  padding: 11px 30px;
+}
+.partial-tip {
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  border-radius: 16px;
+  padding: 11px 15px;
+  margin-bottom: 14px;
 }
 .bottom-act {
   flex: none;

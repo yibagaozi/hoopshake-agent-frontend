@@ -97,8 +97,17 @@ async function send(text) {
   input.value = ''
 
   messages.value.push({ id: `u-${Date.now()}`, role: 'USER', content })
-  const draft = { id: `a-${Date.now()}`, role: 'ASSISTANT', content: '', streaming: true, tools: [] }
+  /*
+   * key 专门用来从列表里删这条草稿。
+   * push 进 ref 数组后读出来的是响应式代理，proxy !== 原对象，
+   * 所以 filter(m => m !== draft) 一条都删不掉，失败时会留下空白气泡。
+   */
+  const key = `d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const draft = { key, id: `a-${Date.now()}`, role: 'ASSISTANT', content: '', streaming: true, tools: [] }
   messages.value.push(draft)
+  const dropDraft = () => {
+    messages.value = messages.value.filter((m) => m.key !== key)
+  }
   streaming.value = true
   scrollBottom()
 
@@ -107,7 +116,7 @@ async function send(text) {
     sessionId = await ensureSession()
   } catch (err) {
     streaming.value = false
-    messages.value = messages.value.filter((m) => m !== draft)
+    dropDraft()
     toast.err(errText(err, '创建会话失败'))
     return
   }
@@ -148,7 +157,7 @@ async function send(text) {
     else toast.err(errText(err, '发送失败'))
   } finally {
     draft.streaming = false
-    if (draft.error && !draft.content) messages.value = messages.value.filter((m) => m !== draft)
+    if (!draft.content) dropDraft()
     streaming.value = false
     controller = null
     loadSessions()

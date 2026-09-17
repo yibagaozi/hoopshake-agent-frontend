@@ -1,7 +1,7 @@
 // 场边状态中枢：REST 取全量快照，WS 打增量补丁，大屏与操作台共用同一份数据。
 
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import * as edgeApi from "@/api/edge.js";
 import { openWs } from "@/composables/useWs.js";
 import { LOG_POSE_FRAMES } from "@/config/features.js";
@@ -28,6 +28,12 @@ export const useEdgeStore = defineStore("edge", () => {
   const services = ref(null);
   /** GET /local/cv/status 的原样返回 {state, session}，算法在不在线以它为准 */
   const cv = ref(null);
+  /**
+   * GET /local/calibration/status 的原样返回。本课的球场标定产物。
+   * 没标定的话 edge 默认不给启动 CV（block-cv-when-missing），但录制照常，
+   * 所以这不是「上不了课」，是「这节课没有三角化、不会出动作提示」。
+   */
+  const calib = ref(null);
 
   /* ---------- 实时数据 ---------- */
   const actionFocus = ref(null);
@@ -62,6 +68,8 @@ export const useEdgeStore = defineStore("edge", () => {
   let socket = null;
   let ticker = null;
   let poller = null;
+  /** 标定跑起来之后的快轮询，跑完就停 */
+  let calibPoller = null;
 
   /* ---------- 派生 ---------- */
 
@@ -131,6 +139,26 @@ export const useEdgeStore = defineStore("edge", () => {
    * 这会让识别结果里的 student_id / global_id 全是 null —— 算法去错 gallery 认人了，
    * 现象很隐蔽，所以单独标出来。
    */
+  /* ---------- 球场标定 ---------- */
+
+  /** 拿到过状态没有。没拿到时界面说「未知」，不要冒充「未标定」 */
+  const calibKnown = computed(() => !!calib.value);
+  /** 上课闸只看这一个：产物齐不齐 */
+  const calibReady = computed(() => calib.value?.ready === true);
+  const calibMissing = computed(() => calib.value?.missingFiles || []);
+  const calibRun = computed(() => calib.value?.lastRun || null);
+  const calibRunState = computed(() => String(calibRun.value?.state || "NONE").toUpperCase());
+  const calibRunning = computed(() => calibRunState.value === "RUNNING");
+  const calibratedAt = computed(() => calib.value?.calibratedAt || null);
+  /**
+   * 标定产物是按课程目录隔离的，所以状态里的 session 必须是本课。
+   * 刚换过课、状态还没刷新时，旧的 ready 会骗人。
+   */
+  const calibStale = computed(() => {
+    const want = lesson.value?.lessonId;
+    return !!(want && calib.value?.session && calib.value.session !== want);
+  });
+
   const cvSessionMismatch = computed(() => {
     const want = lesson.value?.lessonId;
     return !!(cvAlive.value && want && cvSession.value && cvSession.value !== want);
@@ -188,6 +216,60 @@ export const useEdgeStore = defineStore("edge", () => {
     } catch {
       // 端点不可用时保持原值，由 /local/state 与骨架帧活性兜底
     }
+  }
+
+  /*
+   * 课程 id 是异步到的（connect 里先 refresh 再拿到 lesson），
+   * 所以挂载那一刻 refreshCalibration 会因为没有 session 空跑一次。
+   * 盯着 lessonId：它一出现/一变化就按新课查一次，别等下一轮 10 秒轮询。
+   */
+  watch(
+    () => lesson.value?.lessonId,
+    (id, prev) => {
+      if (id === prev) return;
+      calib.value = null;
+      if (id) refreshCalibration();
+    },
+  );
+
+  async function refreshCalibration() {
+    const sess = lesson.value?.lessonId;
+    if (!sess) {
+      calib.value = null;
+      return null;
+    }
+    try {
+      calib.value = await edgeApi.getCalibrationStatus(sess);
+    } catch {
+      // 只读接口，拿不到就保持原值；界面按「未知」显示，别当成未标定
+    }
+    return calib.value;
+  }
+
+  /**
+   * 触发标定。立即回 RUNNING，这里接着开一个 3 秒快轮询跟到终态。
+   * 注意这不是全自动：还要人去算法机上完成 GUI 标注，界面必须说清楚。
+   */
+  async function runCalibration(force = false) {
+    const sess = lesson.value?.lessonId;
+    if (!sess) throw new Error("尚未选课，先选本节课再标定");
+    const res = await edgeApi.runCalibration(sess, force);
+    await refreshCalibration();
+    startCalibPolling();
+    return res;
+  }
+
+  function startCalibPolling() {
+    stopCalibPolling();
+    calibPoller = setInterval(async () => {
+      await refreshCalibration();
+      if (!calibRunning.value) stopCalibPolling();
+    }, 3000);
+  }
+
+  function stopCalibPolling() {
+    clearInterval(calibPoller);
+    calibPoller = null;
   }
 
   async function refreshRecord() {
@@ -311,12 +393,14 @@ export const useEdgeStore = defineStore("edge", () => {
       refreshCv();
       refreshRecord();
       refreshRoster();
+      refreshCalibration();
     }, 10000);
 
     refresh();
     refreshCv();
     refreshRecord();
     refreshRoster();
+    refreshCalibration();
   }
 
   function disconnect() {
@@ -324,6 +408,7 @@ export const useEdgeStore = defineStore("edge", () => {
     socket = null;
     clearInterval(ticker);
     clearInterval(poller);
+    stopCalibPolling();
     ticker = null;
     poller = null;
   }
@@ -376,6 +461,9 @@ export const useEdgeStore = defineStore("edge", () => {
     const res = await edgeApi.selectLesson(lessonId);
     await refresh();
     await refreshRoster();
+    // 标定产物按课程目录隔离，换课就得按新课重查，旧课的 ready 不作数
+    calib.value = null;
+    await refreshCalibration();
     return res;
   }
 
@@ -412,6 +500,9 @@ export const useEdgeStore = defineStore("edge", () => {
     cvAlive, poseAlive, mediamtxReady, ffmpegReady, anchorCamera,
     cvState, cvSession, cvStateKnown, cvSessionMismatch,
     refreshCv, startCv, stopCv, restartCv,
+    calib, calibKnown, calibReady, calibMissing, calibRun, calibRunState,
+    calibRunning, calibratedAt, calibStale,
+    refreshCalibration, runCalibration,
     refresh, refreshRoster, refreshRecord,
     connect, disconnect,
     selectLesson, start, pause, resume, stop,

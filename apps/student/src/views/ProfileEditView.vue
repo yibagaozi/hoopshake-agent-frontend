@@ -14,10 +14,11 @@ const legLength = ref('')
 const saving = ref(false)
 
 onMounted(async () => {
+  // 这三个字段现在由 /api/auth/me 返回，换设备登录也能读回来
   const me = await auth.fetchMe()
-  hand.value = me?.dominantHand || auth.profileExtra.dominantHand || null
-  height.value = me?.heightCm ?? auth.profileExtra.heightCm ?? ''
-  legLength.value = me?.legLengthCm ?? auth.profileExtra.legLengthCm ?? ''
+  hand.value = me?.dominantHand ?? auth.user?.dominantHand ?? null
+  height.value = me?.heightCm ?? auth.user?.heightCm ?? ''
+  legLength.value = me?.legLengthCm ?? auth.user?.legLengthCm ?? ''
 })
 
 async function save() {
@@ -29,10 +30,16 @@ async function save() {
     toast('身高看起来不太对哦')
     return
   }
+  // 腿长原来没校验，填错了会直接进 3D 分析
+  if (payload.legLengthCm !== undefined && !(payload.legLengthCm > 30 && payload.legLengthCm < 160)) {
+    toast('腿长看起来不太对哦')
+    return
+  }
   saving.value = true
   try {
-    const res = await studentDataApi.updateProfile(payload)
-    auth.setProfileExtra(res || payload)
+    await studentDataApi.updateProfile(payload)
+    // 保存后重新拉 me，让「我的」页立刻显示新值（不再走本机缓存）
+    await auth.fetchMe()
     toast.ok('已保存')
     router.back()
   } catch (err) {

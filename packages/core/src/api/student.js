@@ -24,7 +24,32 @@ export const studentChatApi = {
 export const studentHelpApi = {
   /** SSE 的 assist 事件建议求助时调它，question 用 assist.question */
   create: (payload) => http.post('/api/student/help-requests', payload),
+  /** 每条含 id/question/status/teacherName/teacherReply/createdAt/handledAt */
   list: (page = 0, size = 20) => http.get('/api/student/help-requests', { page, size }),
+}
+
+/**
+ * 求助工单状态。枚举全集就这四个（后端 2026-09-17 确认），
+ * 之前前端猜的 HANDLED/CLOSED/DONE/REPLIED 都不存在。
+ */
+export const HELP_STATUS = {
+  PENDING: { label: '待查看', tone: 'warn' },
+  VIEWED: { label: '老师已查看', tone: 'info' },
+  RESOLVED: { label: '已答复', tone: 'ok' },
+  DISMISSED: { label: '已关闭', tone: 'muted' },
+}
+
+export function helpStatusLabel(s) {
+  return HELP_STATUS[s]?.label || s || '—'
+}
+
+export function helpStatusTone(s) {
+  return HELP_STATUS[s]?.tone || 'muted'
+}
+
+/** 还没处理完的，学生端据此排在前面 */
+export function helpIsOpen(s) {
+  return s === 'PENDING' || s === 'VIEWED'
 }
 
 /** §4 学生训练数据 /api/student/data */

@@ -69,6 +69,34 @@ async function save() {
   }
 }
 
+/*
+ * 重置密码。后端把密码重置回学校统一的初始密码
+ * （配置 hoopshake.student.initial-password，留空则是学号本身），
+ * **不回明文** —— 所以这里不能做「复制新密码」，只能提示教师按学校约定告知。
+ * 账号保持 ACTIVE，不退回待激活。
+ */
+const resetOpen = ref(false)
+const resetting = ref(false)
+const resetDone = ref(false)
+
+async function doReset() {
+  resetting.value = true
+  try {
+    await teacherStudentApi.resetPassword(props.studentId)
+    resetDone.value = true
+  } catch (err) {
+    toast.err(errText(err, '重置失败'))
+    resetOpen.value = false
+  } finally {
+    resetting.value = false
+  }
+}
+
+function openReset() {
+  resetDone.value = false
+  resetOpen.value = true
+}
+
 async function reid() {
   try {
     await teacherStudentApi.reidCorrection(props.studentId, {})
@@ -116,6 +144,7 @@ onMounted(async () => {
         </div>
       </div>
       <div style="display: flex; gap: 12px">
+        <button class="btn" @click="openReset">重置密码</button>
         <button class="btn" @click="reid">识别纠正</button>
         <button class="btn primary" @click="openEdit">编辑资料</button>
       </div>
@@ -212,9 +241,48 @@ onMounted(async () => {
       <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
     </template>
   </Modal>
+
+  <!-- 重置密码。学生自助改密走学生端，这里是他忘了密码时的唯一出路 -->
+  <Modal :open="resetOpen" :title="resetDone ? '密码已重置' : '重置登录密码'" @close="resetOpen = false">
+    <template v-if="!resetDone">
+      <div class="rs-t">
+        把 <b>{{ detail?.displayName || '该学生' }}</b>（{{ detail?.studentNo }}）的密码重置回学校统一的初始密码。
+      </div>
+      <div class="rs-s">
+        账号状态不变，不需要重新激活。重置后请按学校约定把初始密码告知学生，
+        并提醒他登录后到「我的 · 修改密码」改掉。
+      </div>
+    </template>
+    <template v-else>
+      <div class="rs-t">已重置为学校统一的初始密码。</div>
+      <div class="rs-s">
+        系统不返回明文密码，请按学校约定告知学生（通常是统一初始密码，或学号本身）。
+      </div>
+    </template>
+    <template #foot>
+      <template v-if="!resetDone">
+        <button class="btn" @click="resetOpen = false">取消</button>
+        <button class="btn primary" :disabled="resetting" @click="doReset">
+          {{ resetting ? '重置中…' : '确认重置' }}
+        </button>
+      </template>
+      <button v-else class="btn primary" @click="resetOpen = false">知道了</button>
+    </template>
+  </Modal>
 </template>
 
 <style scoped>
+.rs-t {
+  font-size: 15px;
+  color: var(--ink);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+.rs-s {
+  font-size: 13px;
+  color: var(--gray);
+  line-height: 1.75;
+}
 .stat4 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

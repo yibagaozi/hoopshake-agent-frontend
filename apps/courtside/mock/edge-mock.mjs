@@ -67,6 +67,35 @@ const students = [
   galleryReady,
 }));
 
+/* ---------- 球场标定 ---------- */
+
+// MOCK_CALIB: ready | missing | running | failed，默认 missing（更值得看的那一路）
+const calibMode = process.env.MOCK_CALIB || "missing";
+const calibState = {
+  mode: calibMode,
+  // runCalibration 之后转 RUNNING，几秒后按 mode 落到终态
+  run: null,
+};
+
+const ALL_FILES = ["cameras.json", "camera_centers_world.json", "cam_01.json", "cam_02.json", "cam_03.json"];
+
+function calibPayload(session) {
+  const m = calibState.mode;
+  const ready = m === "ready";
+  const present = ready ? ALL_FILES : ALL_FILES.slice(0, 3);
+  const missing = ready ? [] : ALL_FILES.slice(3);
+  return {
+    session,
+    artifactDir: `C:/hoopshake/Basketball_inclass_system/data/calibration/live_${session}`,
+    ready,
+    dirExists: true,
+    presentFiles: present,
+    missingFiles: missing,
+    calibratedAt: ready ? new Date(Date.now() - 900000).toISOString() : null,
+    lastRun: calibState.run,
+  };
+}
+
 const routes = {
   "GET /local/state": () =>
     ok({
@@ -84,6 +113,40 @@ const routes = {
 
   "GET /local/lesson": () => ok(lesson),
   "GET /local/session": () => ok(session),
+
+  "POST /local/calibration/run": (body) => {
+    if (calibState.mode === "unavailable") {
+      return { code: 50333, message: "编排未启用或命令未配置", data: null };
+    }
+    if (calibState.run?.state === "RUNNING") {
+      return { code: 40918, message: "已有标定任务在进行中", data: null };
+    }
+    if (calibState.mode === "ready" && !body.force) {
+      // 产物已齐且没强制：直接回上次结果，不重复执行
+      return ok(calibState.run || { session: body.session, state: "SUCCEEDED", message: "产物已齐，未重复执行" });
+    }
+    calibState.run = {
+      session: body.session,
+      state: "RUNNING",
+      exitCode: null,
+      message: "标定进程已拉起，等待人工标注",
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    };
+    const settleTo = process.env.MOCK_CALIB_RESULT || "SUCCEEDED";
+    setTimeout(() => {
+      calibState.run = {
+        ...calibState.run,
+        state: settleTo,
+        exitCode: 0,
+        message:
+          settleTo === "FAILED" ? "标定进程已结束但产物不完整: [cam_03.json]" : "标定完成",
+        finishedAt: new Date().toISOString(),
+      };
+      if (settleTo === "SUCCEEDED") calibState.mode = "ready";
+    }, Number(process.env.MOCK_CALIB_MS || 2000));
+    return ok(calibState.run);
+  },
 
   "GET /local/roster": () =>
     ok({ lessonId: lesson.lessonId, syncedAt: startedAt, total: 18, galleryReadyCount: 16, students }),
@@ -148,6 +211,12 @@ const server = http.createServer((req, res) => {
         galleryVersion: n >= 5 ? 2 : null,
         failReason: null,
       }));
+    }
+
+    if (url.pathname === "/local/calibration/status") {
+      const sess = url.searchParams.get("session") || "";
+      if (!sess) return json(res, { code: 40000, message: "session 非法", data: null });
+      return json(res, ok(calibPayload(sess)));
     }
 
     const handler = routes[key];

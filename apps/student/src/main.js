@@ -3,7 +3,11 @@ import { createPinia } from 'pinia'
 import { configureApi, getAccessToken, loadVocabulary } from '@hoopshake/core'
 import App from './App.vue'
 import { createStudentRouter } from './router.js'
+import { installViewportFix } from './viewport.js'
 import './styles/base.css'
+
+// 软键盘弹出时别让输入条被盖住（iOS 兜底，安卓走 viewport meta）
+installViewportFix()
 
 configureApi({
   baseUrl: import.meta.env.VITE_API_BASE_URL || '',

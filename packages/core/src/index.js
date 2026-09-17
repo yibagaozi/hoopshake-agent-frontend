@@ -32,11 +32,19 @@ export {
   phaseLabel,
 } from './vocabulary.js'
 export { renderMarkdown } from './markdown.js'
-export { ERROR_MESSAGES, errText, isNotOpen } from './errors.js'
+export { ERROR_MESSAGES, errText, isNotOpen, isQuotaExhausted } from './errors.js'
 export * from './enums.js'
 export * from './format.js'
-export { authApi } from './api/auth.js'
-export { studentChatApi, studentDataApi, studentHelpApi } from './api/student.js'
+export { authApi, aiUsageApi } from './api/auth.js'
+export {
+  studentChatApi,
+  studentDataApi,
+  studentHelpApi,
+  HELP_STATUS,
+  helpStatusLabel,
+  helpStatusTone,
+  helpIsOpen,
+} from './api/student.js'
 export {
   lessonApi,
   teacherStudentApi,

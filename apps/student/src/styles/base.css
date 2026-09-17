@@ -77,9 +77,10 @@ textarea {
   font-family: inherit;
 }
 
-/* 手机视口容器：小屏铺满，大屏居中成手机宽度 */
+/* 手机视口容器：小屏铺满，大屏居中成手机宽度。
+   --app-h 只在 iOS 软键盘弹出时由 viewport.js 写入（见那边的注释） */
 .phone-viewport {
-  height: 100%;
+  height: var(--app-h, 100%);
   max-width: 430px;
   margin: 0 auto;
   background: var(--page);
