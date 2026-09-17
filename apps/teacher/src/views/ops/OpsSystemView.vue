@@ -7,11 +7,20 @@ import OpsTabs from '../../components/OpsTabs.vue'
 const loading = ref(true)
 const sys = ref(null)
 const updatedAt = ref('')
-/** Grafana 面板地址存本地，不同环境各填各的，不进构建产物 */
-const GRAFANA_KEY = 'hoopshake.ops.grafanaUrl'
-const grafanaUrl = ref(localStorage.getItem(GRAFANA_KEY) || '')
-const editingGrafana = ref(false)
-const grafanaDraft = ref('')
+
+/*
+ * Grafana 嵌入地址改由后端下发（GET /api/ops/grafana）。
+ *
+ * 原来是让人在页面上填一个地址存 localStorage —— 那份配置只活在这一台
+ * 浏览器里，换台机器就没了，而且页面上摆个输入框会让人以为这是业务配置。
+ * 现在跟 edge 的接口地址一样：读配置，页面不留输入口。
+ */
+const graf = ref(null)
+const grafLoaded = ref(false)
+
+/** 没配就整块不渲染。这不是错误，是这套环境还没接 Grafana */
+const grafReady = computed(() => grafLoaded.value && graf.value?.configured === true && !!graf.value?.embedUrl)
+const grafHeight = computed(() => Number(graf.value?.embedHeight) || 600)
 
 let timer = null
 
@@ -37,19 +46,31 @@ async function load(silent = false) {
   }
 }
 
-function saveGrafana() {
-  const v = grafanaDraft.value.trim()
-  grafanaUrl.value = v
-  if (v) localStorage.setItem(GRAFANA_KEY, v)
-  else localStorage.removeItem(GRAFANA_KEY)
-  editingGrafana.value = false
+async function loadGrafana() {
+  try {
+    graf.value = await opsApi.grafana()
+  } catch {
+    // 拿不到就按未配置处理：宁可不显示，也别显示一个空白 iframe
+    graf.value = null
+  } finally {
+    grafLoaded.value = true
+  }
 }
 
 onMounted(() => {
   load()
+  // 嵌入地址是配置项，一次就够，不跟着 15 秒轮询走
+  loadGrafana()
   timer = setInterval(() => load(true), 15000)
 })
 onBeforeUnmount(() => clearInterval(timer))
+
+// 老版本把地址存在这儿，现在改由后端下发，顺手清掉
+try {
+  localStorage.removeItem('hoopshake.ops.grafanaUrl')
+} catch {
+  /* 隐私模式等场景忽略 */
+}
 </script>
 
 <template>
@@ -122,46 +143,59 @@ onBeforeUnmount(() => clearInterval(timer))
           </div>
         </div>
 
-        <div class="sec-label" style="margin-top: 26px">时序指标</div>
-        <div class="panel graf">
-          <div v-if="!grafanaUrl && !editingGrafana" class="graf-empty">
-            <div class="ge-t">尚未接入 Grafana</div>
+        <!-- 后端没配 Grafana 时整块不渲染：空 iframe 看着像挂了 -->
+        <template v-if="grafReady">
+          <div class="graf-head" style="margin-top: 26px">
+            <span class="sec-label" style="margin: 0">时序指标</span>
+            <a
+              v-if="graf?.dashboardUrl"
+              class="btn sm"
+              :href="graf.dashboardUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              在 Grafana 中打开
+            </a>
+          </div>
+          <div class="panel graf">
+            <iframe
+              :src="graf.embedUrl"
+              class="graf-frame"
+              :style="{ height: grafHeight + 'px' }"
+              referrerpolicy="no-referrer"
+              loading="lazy"
+            ></iframe>
+          </div>
+        </template>
+
+        <!-- 没配就只留一句说明，不给「填写地址」那种会误导的入口 -->
+        <template v-else-if="grafLoaded">
+          <div class="sec-label" style="margin-top: 26px">时序指标</div>
+          <div class="panel graf-none">
+            <div class="ge-t">这套环境还没接 Grafana</div>
             <div class="ge-s">
-              后端只暴露数据源 <code>/actuator/prometheus</code> 供 Grafana 采集，指标名
-              <code>hoopshake.llm.circuit.state</code>、<code>hoopshake.llm.stream.*</code>、
-              <code>hoopshake.ask.ratelimit.*</code>。<br />
-              面板建在自己的 Grafana 上，把嵌入地址填进来即可在这里直接看。
-            </div>
-            <button class="btn primary" @click="grafanaDraft = grafanaUrl; editingGrafana = true">
-              填写面板地址
-            </button>
-          </div>
-
-          <div v-else-if="editingGrafana" class="graf-edit">
-            <div class="fld">
-              <label>Grafana 嵌入地址</label>
-              <input v-model="grafanaDraft" class="txt" placeholder="https://grafana.example.com/d-solo/xxx?panelId=1&kiosk" />
-            </div>
-            <div class="ge-s" style="margin: 10px 0 14px">
-              只存在本机浏览器里，不进构建产物。后端不参与，这一段纯前端嵌入。<br />
-              Grafana 侧要放开三项，缺一面板就会白屏或反复要求登录：
-              <code>allow_embedding = true</code>、
-              <code>security.cookie_samesite = none</code>（新版必需，否则跨站 cookie 丢）、
-              以及别用 <code>X-Frame-Options: DENY</code> 挡掉本站。
-            </div>
-            <div style="display: flex; gap: 10px">
-              <button class="btn" @click="editingGrafana = false">取消</button>
-              <button class="btn primary" @click="saveGrafana">保存</button>
+              上面几格是现状快照，趋势曲线要靠 Grafana。后端不出图，只把数据源
+              <code>{{ graf?.metricsPath || '/actuator/prometheus' }}</code> 暴露给 Grafana 采集，
+              面板建在你们自己的 Grafana 上，再把嵌入地址配进后端
+              （<code>GRAFANA_EMBED_URL</code> / <code>GRAFANA_DASHBOARD_URL</code>），这里就会出现。<br />
+              注意该数据源现在要鉴权：Prometheus 抓取需带
+              <code>X-Service-Token</code>，人工 curl 需管理员 JWT。
             </div>
           </div>
+        </template>
 
-          <template v-else>
-            <div class="graf-bar">
-              <span class="gb-url">{{ grafanaUrl }}</span>
-              <button class="btn sm" @click="grafanaDraft = grafanaUrl; editingGrafana = true">更换</button>
-            </div>
-            <iframe :src="grafanaUrl" class="graf-frame" referrerpolicy="no-referrer"></iframe>
-          </template>
+        <div class="note metrics-note">
+          自定义指标（PromQL 里点要写成下划线）：<br />
+          <code>hoopshake_llm_stream_active</code> / <code>hoopshake_llm_stream_available</code> /
+          <code>hoopshake_ask_ratelimit_keys</code> —— 瞬时值，gauge。<br />
+          <code>hoopshake_llm_stream_rejected_total</code> /
+          <code>hoopshake_ask_ratelimit_rejected_total</code> —— 累计值，counter，
+          用 <code>rate()</code> 或 <code>increase()</code> 看。
+          <b>这两个名字刚变过</b>：原来注册成 gauge 且没有 <code>_total</code> 后缀，
+          旧面板的查询会静默变成 No data，记得改。<br />
+          <code>hoopshake_llm_circuit_state</code>（0=CLOSED 1=OPEN 2=HALF_OPEN）
+          只在开了 agent 的环境才注册。<b>No data 不等于熔断器健康</b>，
+          它可能压根不存在，告警要用 <code>absent()</code> 区分。
         </div>
       </template>
     </div>
@@ -239,10 +273,16 @@ onBeforeUnmount(() => clearInterval(timer))
   padding: 0;
   overflow: hidden;
 }
-.graf-empty,
-.graf-edit {
-  padding: 30px 26px;
-  max-width: 620px;
+.graf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.graf-none {
+  padding: 26px 24px;
+  max-width: 700px;
 }
 .ge-t {
   font-size: 16px;
@@ -261,26 +301,24 @@ onBeforeUnmount(() => clearInterval(timer))
   border-radius: 5px;
   padding: 2px 6px;
 }
-.graf-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
-}
-.gb-url {
-  flex: 1;
-  min-width: 0;
-  font: 500 12px/1.4 var(--mono);
-  color: var(--gray);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .graf-frame {
   width: 100%;
-  height: 420px;
   border: none;
   display: block;
+}
+.metrics-note {
+  margin-top: 22px;
+  font-size: 12px;
+  color: var(--gray-2);
+  line-height: 1.9;
+}
+.metrics-note code {
+  font: 500 11px/1 var(--mono);
+  background: var(--fill-2);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.metrics-note b {
+  color: var(--ink-2);
 }
 </style>

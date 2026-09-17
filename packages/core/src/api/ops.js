@@ -17,6 +17,14 @@ export const opsApi = {
   /** health 可选 ONLINE / STALE / OFFLINE，不传为全部 */
   devices: (health) => http.get('/api/ops/edge/devices', { health }),
   device: (deviceId) => http.get(`/api/ops/edge/devices/${deviceId}`),
+  /**
+   * Grafana 嵌入地址。后端**不出图** —— 它只把 /actuator/prometheus 暴露给
+   * Grafana 当数据源，面板建在各自的 Grafana 上，这里只是把配好的地址交出来。
+   *
+   * configured=false 不是错误，是「这套环境还没接 Grafana」，整块隐藏即可，
+   * 别渲染一个空 iframe（那看着像挂了）。后端会把空白串也判成未配置。
+   */
+  grafana: () => http.get('/api/ops/grafana'),
 }
 
 /**
