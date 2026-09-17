@@ -8,9 +8,15 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+/*
+ * 侧栏只放能直接点进去的一级入口。
+ * 「课程配置」曾经在这里，但它没有自己的入口 —— 必须先选一门课，
+ * 从课程详情页进去，路径也是 /lessons/:id/config。侧栏放一个点了
+ * 只会跳回课程列表的项，是在骗人，所以撤掉；配置页打开时高亮仍落在
+ * 「概览」上（见 router 里那几条的 meta.nav）。
+ */
 const teacherItems = [
   { key: 'lessons', label: '概览', to: '/lessons' },
-  { key: 'config', label: '课程配置', to: '/lessons' },
   { key: 'students', label: '学生', to: '/students' },
   { key: 'plan', label: '备课', to: '/plan' },
   { key: 'assistant', label: '对话', to: '/assistant' },
@@ -39,9 +45,6 @@ async function logout() {
 <template>
   <div class="rail-wrap">
     <div class="rail">
-      <div class="logo">
-        <div class="ring"></div>
-      </div>
       <template v-for="item in items" :key="item.key">
         <div v-if="item.divide" class="rail-divide"></div>
         <button
@@ -55,13 +58,6 @@ async function logout() {
           <rect x="14" y="3" width="7" height="7" rx="1.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
           <rect x="3" y="14" width="7" height="7" rx="1.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
           <rect x="14" y="14" width="7" height="7" rx="1.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
-        </svg>
-        <!-- 课程配置 -->
-        <svg v-else-if="item.key === 'config'" width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <rect x="3.5" y="5" width="17" height="15" rx="2.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
-          <line x1="3.5" y1="9.5" x2="20.5" y2="9.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" />
-          <line x1="8" y1="3" x2="8" y2="6.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" />
-          <line x1="16" y1="3" x2="16" y2="6.5" :stroke="route.meta.nav === item.key ? '#fff' : '#8A8A8E'" stroke-width="1.9" stroke-linecap="round" />
         </svg>
         <!-- 学生 -->
         <svg v-else-if="item.key === 'students'" width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -105,40 +101,30 @@ async function logout() {
 </template>
 
 <style scoped>
+/*
+ * 侧栏槽位。底色跟右侧正文同一个（--bg）—— 之前这里是 --fill，
+ * 比正文深一档，屏幕上就是一条竖着的色带把页面劈成两半。
+ * 左右留白也做成对称的：原来是左 18 右 2，侧栏整个贴着正文，
+ * 看上去并不在自己的色块中间。
+ */
 .rail-wrap {
   flex: none;
-  padding: 18px 2px 18px 18px;
+  padding: 18px 14px;
   display: flex;
-  background: var(--fill);
+  background: var(--bg);
 }
 .rail {
   width: 88px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 26px;
+  /* 阴影按原样保留 */
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.09), 0 2px 8px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 16px 9px;
   gap: 5px;
-}
-.logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 10px;
-  flex: none;
-}
-.logo .ring {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 2.4px solid #fff;
 }
 .nav-item {
   width: 100%;

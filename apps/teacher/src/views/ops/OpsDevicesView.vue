@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   edgeHealthLabel,
   edgeHealthTone,
@@ -13,6 +14,7 @@ import { toast } from '../../toast.js'
 import Modal from '../../components/Modal.vue'
 import OpsTabs from '../../components/OpsTabs.vue'
 
+const router = useRouter()
 const loading = ref(true)
 const summary = ref(null)
 const devices = ref([])
@@ -177,6 +179,12 @@ onBeforeUnmount(() => clearInterval(timer))
           <span>最近心跳</span><b class="mono">{{ detail.lastSeenAt ? fmtDateTime(detail.lastSeenAt) : '从未上报' }}</b>
         </div>
 
+        <div class="d-act">
+          <button class="btn sm" @click="router.push({ path: '/ops/telemetry', query: { edgeId: detail.deviceId } })">
+            查看这台的遥测
+          </button>
+        </div>
+
         <div v-if="detail.lastError" class="err-box">
           <div class="eb-t">最近一次错误</div>
           <div class="eb-s">{{ detail.lastError }}</div>
@@ -195,14 +203,6 @@ onBeforeUnmount(() => clearInterval(timer))
 </template>
 
 <style scoped>
-.filter-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 32px 16px;
-}
 .dev {
   display: flex;
   flex-direction: column;
@@ -256,6 +256,9 @@ onBeforeUnmount(() => clearInterval(timer))
   font-weight: 600;
   color: var(--ink-2);
   word-break: break-all;
+}
+.d-act {
+  margin-top: 18px;
 }
 .err-box {
   margin-top: 18px;

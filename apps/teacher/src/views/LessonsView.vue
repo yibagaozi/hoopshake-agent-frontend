@@ -432,16 +432,6 @@ onMounted(() => {
   color: var(--brand-deep);
   font-weight: 600;
 }
-.filter-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 15px 32px;
-  background: #fff;
-  border-bottom: 1px solid var(--line);
-}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

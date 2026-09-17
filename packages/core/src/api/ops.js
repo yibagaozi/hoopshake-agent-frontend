@@ -20,6 +20,28 @@ export const opsApi = {
 }
 
 /**
+ * 边缘遥测 /api/ops/edge/telemetry/** · 全部 ADMIN · 全部 GET 无 body
+ *
+ * 和 /api/ops/edge/devices 的区别：devices 看的是「机器现在还在不在」，
+ * 这四个看的是机器上跑出了什么 —— 日志、指标点、进程生命周期。排障时
+ * 先在 devices 找到那台，再来这里翻它的日志与进程。
+ *
+ * 四个筛选参数都可不传（不传即全部）。空串会被 buildUrl 丢掉，所以
+ * 视图里直接把「未选择」留成 '' 就行，不用手动删键。
+ */
+export const opsTelemetryApi = {
+  /** 窗口内的总量与最近若干条，首屏一次拉全 */
+  summary: ({ edgeId, windowHours = 24 } = {}) =>
+    http.get('/api/ops/edge/telemetry/summary', { edgeId, windowHours }),
+  /** 日志分页。keyword 走后端全文匹配，from/to 为 ISO 时间 */
+  logs: (q = {}) => http.get('/api/ops/edge/telemetry/logs', { page: 0, size: 20, ...q }),
+  /** 指标点分页。metricName 是精确名，dims 是自由维度对象 */
+  metrics: (q = {}) => http.get('/api/ops/edge/telemetry/metrics', { page: 0, size: 20, ...q }),
+  /** 进程运行记录分页。一条 = 一次进程从拉起到退出 */
+  runs: (q = {}) => http.get('/api/ops/edge/telemetry/runs', { page: 0, size: 20, ...q }),
+}
+
+/**
  * 运维诊断对话 /api/ops/chat · ADMIN · SSE
  * 路径与学生对话对称，但没有 interrupt。只读诊断助手：给建议、不执行动作。
  * 事件比学生对话少两个：只有 meta/delta/tool/done/error —— 运维诊断不挂 RAG、
@@ -93,4 +115,79 @@ export function pct(v, digits = 1) {
 export function num(v) {
   if (v === null || v === undefined) return '—'
   return Number(v).toLocaleString('zh-CN')
+}
+
+/**
+ * 日志级别。后端目前只产 ERROR/WARN/INFO 三档（summary 也只分这三个计数），
+ * DEBUG/TRACE/FATAL 一并列上：真出现了也有个中性样式，不至于掉进 undefined。
+ */
+export const LOG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE']
+
+const LOG_LEVEL_TONE = {
+  FATAL: 'danger',
+  ERROR: 'danger',
+  WARN: 'warn',
+  INFO: 'info',
+  DEBUG: 'muted',
+  TRACE: 'muted',
+}
+
+export function logLevelTone(level) {
+  return LOG_LEVEL_TONE[String(level || '').toUpperCase()] || 'muted'
+}
+
+/**
+ * 进程运行状态。文档只点名了 running / failed 两类计数，没给完整枚举，
+ * 所以这里认识的词给中文，不认识的**原样显示**——硬套成「未知」会把
+ * 后端新加的状态盖掉，排障时反而看不见。
+ */
+const RUN_STATUS = {
+  RUNNING: { label: '运行中', tone: 'ok' },
+  STARTING: { label: '启动中', tone: 'info' },
+  SUCCEEDED: { label: '已完成', tone: 'muted' },
+  SUCCESS: { label: '已完成', tone: 'muted' },
+  FINISHED: { label: '已完成', tone: 'muted' },
+  EXITED: { label: '已退出', tone: 'muted' },
+  STOPPED: { label: '已停止', tone: 'muted' },
+  FAILED: { label: '失败', tone: 'danger' },
+  ERROR: { label: '失败', tone: 'danger' },
+  CRASHED: { label: '崩溃', tone: 'danger' },
+  KILLED: { label: '被终止', tone: 'warn' },
+  TIMEOUT: { label: '超时', tone: 'warn' },
+}
+
+export function runStatusLabel(status) {
+  if (!status) return '—'
+  return RUN_STATUS[String(status).toUpperCase()]?.label || status
+}
+
+export function runStatusTone(status) {
+  if (!status) return 'muted'
+  return RUN_STATUS[String(status).toUpperCase()]?.tone || 'muted'
+}
+
+/** 对话类型（agent/quality 的 byChatType）。固定 STUDENT / TEACHER 两项 */
+export const CHAT_TYPES = ['STUDENT', 'TEACHER']
+
+const CHAT_TYPE_LABEL = { STUDENT: '学生端', TEACHER: '教师端' }
+
+export function chatTypeLabel(t) {
+  return CHAT_TYPE_LABEL[String(t || '').toUpperCase()] || t || '—'
+}
+
+/**
+ * 进程时长。fmtMs 给的是 mm:ss，适合课堂里的秒表，
+ * 但进程能跑几小时甚至几天，那种长度得换个写法。
+ */
+export function fmtDurationMs(ms) {
+  if (ms === null || ms === undefined || Number.isNaN(Number(ms))) return '—'
+  const n = Math.max(0, Number(ms))
+  if (n < 1000) return `${Math.round(n)} 毫秒`
+  const s = Math.floor(n / 1000)
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分 ${s % 60} 秒`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} 小时 ${m % 60} 分`
+  return `${Math.floor(h / 24)} 天 ${h % 24} 小时`
 }

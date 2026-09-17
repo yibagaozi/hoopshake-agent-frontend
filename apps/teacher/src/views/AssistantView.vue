@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   errText,
   fmtFriendly,
@@ -21,6 +21,19 @@ const suggestions = ref([])
 const bodyEl = ref(null)
 
 let controller = null
+
+/**
+ * 会话区那一栏的标题。
+ *
+ * 原来这里重复写着「教学助手」—— 页头刚说过一遍，隔 60 像素再说一遍，
+ * 占着整页唯一能显示「我现在开的是哪个会话」的位置什么也没说。
+ * 改成当前会话名，助手身份留在下面那行副标题里（带状态点的那行）。
+ */
+const convTitle = computed(() => {
+  if (!currentId.value) return '新对话'
+  const s = sessions.value.find((x) => x.sessionId === currentId.value)
+  return s?.title || '未命名对话'
+})
 
 function scrollBottom(smooth = true) {
   nextTick(() => {
@@ -220,7 +233,7 @@ onBeforeUnmount(() => controller?.abort())
         <div class="conv-head">
           <span class="logo"><span class="ring"></span></span>
           <div>
-            <div style="font-size: 16px; font-weight: 700">教学助手</div>
+            <div class="conv-title">{{ convTitle }}</div>
             <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray)">
               <span class="live-dot"></span>
               Teaching Agent · 检索备课知识库
@@ -276,6 +289,14 @@ onBeforeUnmount(() => controller?.abort())
 </template>
 
 <style scoped>
+.conv-title {
+  font-size: 16px;
+  font-weight: 700;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .threads {
   width: 288px;
   flex: none;
