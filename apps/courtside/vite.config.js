@@ -1,6 +1,10 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { createRequire } from 'node:module'
+import { buildStamp } from '../../packages/core/build-stamp.js'
+
+const pkg = createRequire(import.meta.url)('./package.json')
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -21,7 +25,7 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    plugins: [vue()],
+    plugins: [vue(), buildStamp(pkg.version)],
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
     },

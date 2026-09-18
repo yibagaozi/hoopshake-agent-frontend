@@ -23,7 +23,12 @@ COPY . .
 # 填绝对地址则浏览器直连云端，需云端放行 CORS。
 ARG VITE_CLOUD_BASE_URL=""
 
-RUN VITE_CLOUD_BASE_URL="$VITE_CLOUD_BASE_URL" npm run build:edge
+# 构建水印里的提交号。CI 传 --build-arg GIT_SHA=$GITHUB_SHA，
+# 本地不传就显示 local。水印落在 index.html 的 <meta name="hoopshake-build">，
+# 排查「线上是不是旧镜像」时一条 curl 就能看出来。
+ARG GIT_SHA=""
+
+RUN VITE_CLOUD_BASE_URL="$VITE_CLOUD_BASE_URL" GITHUB_SHA="$GIT_SHA" npm run build:edge
 
 # ───────────────── 运行阶段 ─────────────────
 FROM nginx:1.27-alpine

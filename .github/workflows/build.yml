@@ -58,6 +58,7 @@ jobs:
 
           # 构建上下文为仓库根，两个镜像共用同一份 workspace 与 lockfile
           docker build . --file ${DOCKERFILE} \
+            --build-arg GIT_SHA=${GITHUB_SHA} \
             --tag ${REGISTRY}/${IMAGE_NAME}:$tag \
             --tag ${REGISTRY}/${IMAGE_NAME}:$sha_tag
           docker push ${REGISTRY}/${IMAGE_NAME}:$tag

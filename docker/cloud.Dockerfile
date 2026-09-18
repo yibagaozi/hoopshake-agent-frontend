@@ -21,9 +21,11 @@ ARG TEACHER_BASE=/teacher/
 # API 与前端同源（由 nginx 反代 /api），因此留空即可；
 # 若前后端分域名部署，构建时传入完整地址并在后端放开 CORS
 ARG API_BASE_URL=
+# 构建水印里的提交号。CI 传 --build-arg GIT_SHA=$GITHUB_SHA，本地不传显示 local
+ARG GIT_SHA=""
 
-RUN VITE_BASE_PATH="$STUDENT_BASE" VITE_API_BASE_URL="$API_BASE_URL" npm run build:student \
- && VITE_BASE_PATH="$TEACHER_BASE" VITE_API_BASE_URL="$API_BASE_URL" npm run build:teacher
+RUN GITHUB_SHA="$GIT_SHA" VITE_BASE_PATH="$STUDENT_BASE" VITE_API_BASE_URL="$API_BASE_URL" npm run build:student \
+ && GITHUB_SHA="$GIT_SHA" VITE_BASE_PATH="$TEACHER_BASE" VITE_API_BASE_URL="$API_BASE_URL" npm run build:teacher
 
 # ───────────────── 运行阶段 ─────────────────
 FROM nginx:1.27-alpine
