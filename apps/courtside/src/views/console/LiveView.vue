@@ -62,7 +62,7 @@ const unavailable = computed(() => edge.session?.unavailableCameras || []);
 const calibTone = computed(() => {
   if (!edge.hasLesson) return "off";
   if (edge.calibRunning) return "warn";
-  if (!edge.calibKnown || edge.calibStale) return "off";
+  if (!edge.calibKnown) return "off";
   return edge.calibReady ? "ok" : "bad";
 });
 
@@ -70,7 +70,6 @@ const calibText = computed(() => {
   if (!edge.hasLesson) return "未选课";
   if (edge.calibRunning) return "标定中";
   if (!edge.calibKnown) return "状态未知";
-  if (edge.calibStale) return "核对中";
   return edge.calibReady ? "已标定" : "未标定";
 });
 
@@ -93,9 +92,7 @@ const calibFailMsg = computed(() => {
 });
 
 /** 开课前的提示条：只在「明确知道没标定」时出，状态未知时不吓人 */
-const calibBlocking = computed(
-  () => edge.hasLesson && edge.calibKnown && !edge.calibStale && !edge.calibReady,
-);
+const calibBlocking = computed(() => edge.hasLesson && edge.calibKnown && !edge.calibReady);
 
 const onCalibrate = (force) =>
   run("calib", async () => {
@@ -369,12 +366,13 @@ const cvText = computed(() => {
             </span>
           </div>
 
-          <div v-else-if="edge.calibStale" class="cv-note">
-            刚换过课，正在按本课重新核对标定产物…
+          <div v-else-if="!edge.hasLesson" class="cv-note">
+            标定产物是按课程分开存的，先在「课程」里选本节课，才能查和做标定。
           </div>
 
-          <div v-else-if="!edge.calibKnown && edge.hasLesson" class="cv-note">
-            拿不到标定状态（算法机没开标定功能，或接口不可用）。开课前请人工确认一下。
+          <div v-else-if="!edge.calibKnown" class="cv-note">
+            拿不到标定状态（算法机没开标定功能，或这版 edge 还没有这个接口）。
+            开课前请人工确认一下。
           </div>
 
           <div v-if="edge.calibRunning" class="cv-note run">
@@ -408,6 +406,7 @@ const cvText = computed(() => {
             <button
               class="mini"
               :disabled="busy === 'calibChk' || !edge.hasLesson"
+              :title="edge.hasLesson ? '' : '先选本节课'"
               @click="run('calibChk', () => edge.refreshCalibration())"
             >
               重新检查

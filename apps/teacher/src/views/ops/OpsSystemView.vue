@@ -17,6 +17,8 @@ const updatedAt = ref('')
  */
 const graf = ref(null)
 const grafLoaded = ref(false)
+/** 指标名那一大段是给「要建面板的人」看的，默认收起，别常驻占半屏 */
+const metricsOpen = ref(false)
 
 /** 没配就整块不渲染。这不是错误，是这套环境还没接 Grafana */
 const grafReady = computed(() => grafLoaded.value && graf.value?.configured === true && !!graf.value?.embedUrl)
@@ -147,15 +149,20 @@ try {
         <template v-if="grafReady">
           <div class="graf-head" style="margin-top: 26px">
             <span class="sec-label" style="margin: 0">时序指标</span>
-            <a
-              v-if="graf?.dashboardUrl"
-              class="btn sm"
-              :href="graf.dashboardUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              在 Grafana 中打开
-            </a>
+            <span style="display: flex; align-items: center; gap: 10px">
+              <button class="lnk" @click="metricsOpen = !metricsOpen">
+                {{ metricsOpen ? '收起指标名' : '指标名' }}
+              </button>
+              <a
+                v-if="graf?.dashboardUrl"
+                class="btn sm"
+                :href="graf.dashboardUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                在 Grafana 中打开
+              </a>
+            </span>
           </div>
           <div class="panel graf">
             <iframe
@@ -168,34 +175,40 @@ try {
           </div>
         </template>
 
-        <!-- 没配就只留一句说明，不给「填写地址」那种会误导的入口 -->
-        <template v-else-if="grafLoaded">
-          <div class="sec-label" style="margin-top: 26px">时序指标</div>
-          <div class="panel graf-none">
-            <div class="ge-t">这套环境还没接 Grafana</div>
-            <div class="ge-s">
-              上面几格是现状快照，趋势曲线要靠 Grafana。后端不出图，只把数据源
-              <code>{{ graf?.metricsPath || '/actuator/prometheus' }}</code> 暴露给 Grafana 采集，
-              面板建在你们自己的 Grafana 上，再把嵌入地址配进后端
-              （<code>GRAFANA_EMBED_URL</code> / <code>GRAFANA_DASHBOARD_URL</code>），这里就会出现。<br />
-              注意该数据源现在要鉴权：Prometheus 抓取需带
-              <code>X-Service-Token</code>，人工 curl 需管理员 JWT。
-            </div>
-          </div>
-        </template>
+        <!-- 没配就一行说明带过，不给「填写地址」那种会误导的入口 -->
+        <div v-else-if="grafLoaded" class="graf-off">
+          <span>趋势曲线需要 Grafana，这套环境还没接。</span>
+          <button class="lnk" @click="metricsOpen = !metricsOpen">
+            {{ metricsOpen ? '收起接入说明' : '怎么接' }}
+          </button>
+        </div>
 
-        <div class="note metrics-note">
-          自定义指标（PromQL 里点要写成下划线）：<br />
-          <code>hoopshake_llm_stream_active</code> / <code>hoopshake_llm_stream_available</code> /
-          <code>hoopshake_ask_ratelimit_keys</code> —— 瞬时值，gauge。<br />
-          <code>hoopshake_llm_stream_rejected_total</code> /
-          <code>hoopshake_ask_ratelimit_rejected_total</code> —— 累计值，counter，
-          用 <code>rate()</code> 或 <code>increase()</code> 看。
-          <b>这两个名字刚变过</b>：原来注册成 gauge 且没有 <code>_total</code> 后缀，
-          旧面板的查询会静默变成 No data，记得改。<br />
-          <code>hoopshake_llm_circuit_state</code>（0=CLOSED 1=OPEN 2=HALF_OPEN）
-          只在开了 agent 的环境才注册。<b>No data 不等于熔断器健康</b>，
-          它可能压根不存在，告警要用 <code>absent()</code> 区分。
+        <!-- 接入步骤与指标名。给要建面板的人看，默认收起 -->
+        <div v-if="metricsOpen" class="panel metrics-doc">
+          <div class="md-h">接入 Grafana</div>
+          <div class="md-s">
+            后端不出图，只把数据源 <code>{{ graf?.metricsPath || '/actuator/prometheus' }}</code>
+            暴露给 Grafana 采集。抓取要带 <code>X-Service-Token</code>（人工 curl 用管理员 JWT），
+            面板建在你们自己的 Grafana 上，再把单面板地址
+            （<code>/d-solo/...&kiosk</code>）配进后端 <code>GRAFANA_EMBED_URL</code>，
+            这里就会换成真面板。
+          </div>
+
+          <div class="md-h">建面板用的指标名</div>
+          <div class="md-s">
+            PromQL 里点要写成下划线。<br />
+            <code>hoopshake_llm_stream_active</code> /
+            <code>hoopshake_llm_stream_available</code> /
+            <code>hoopshake_ask_ratelimit_keys</code> —— gauge，瞬时值。<br />
+            <code>hoopshake_llm_stream_rejected_total</code> /
+            <code>hoopshake_ask_ratelimit_rejected_total</code> —— counter，累计值，
+            用 <code>rate()</code> / <code>increase()</code> 看。
+            <b>这两个名字刚变过</b>（原来是 gauge、没有 <code>_total</code>），
+            旧面板的查询会静默变成 No data。<br />
+            <code>hoopshake_llm_circuit_state</code>（0=CLOSED 1=OPEN 2=HALF_OPEN）
+            只在开了 agent 的环境才注册，<b>No data 不等于熔断器健康</b>，
+            告警用 <code>absent()</code> 区分。
+          </div>
         </div>
       </template>
     </div>
@@ -306,19 +319,51 @@ try {
   border: none;
   display: block;
 }
-.metrics-note {
-  margin-top: 22px;
-  font-size: 12px;
+.graf-off {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  font-size: 13px;
   color: var(--gray-2);
-  line-height: 1.9;
 }
-.metrics-note code {
+.lnk {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand-deep);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+.metrics-doc {
+  margin-top: 14px;
+  padding: 20px 22px;
+  max-width: 760px;
+}
+.md-h {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.md-h + .md-s {
+  margin-bottom: 18px;
+}
+.md-s:last-child {
+  margin-bottom: 0;
+}
+.md-s {
+  font-size: 12px;
+  color: var(--gray);
+  line-height: 1.95;
+}
+.md-s code {
   font: 500 11px/1 var(--mono);
   background: var(--fill-2);
   border-radius: 5px;
   padding: 2px 6px;
 }
-.metrics-note b {
+.md-s b {
   color: var(--ink-2);
 }
 </style>

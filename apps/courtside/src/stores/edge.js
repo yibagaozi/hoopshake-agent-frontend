@@ -150,14 +150,6 @@ export const useEdgeStore = defineStore("edge", () => {
   const calibRunState = computed(() => String(calibRun.value?.state || "NONE").toUpperCase());
   const calibRunning = computed(() => calibRunState.value === "RUNNING");
   const calibratedAt = computed(() => calib.value?.calibratedAt || null);
-  /**
-   * 标定产物是按课程目录隔离的，所以状态里的 session 必须是本课。
-   * 刚换过课、状态还没刷新时，旧的 ready 会骗人。
-   */
-  const calibStale = computed(() => {
-    const want = lesson.value?.lessonId;
-    return !!(want && calib.value?.session && calib.value.session !== want);
-  });
 
   const cvSessionMismatch = computed(() => {
     const want = lesson.value?.lessonId;
@@ -232,14 +224,30 @@ export const useEdgeStore = defineStore("edge", () => {
     },
   );
 
+  /**
+   * 换课时旧请求的返回值不能覆盖新课的状态。
+   *
+   * 原来是拿返回体里的 session 跟当前课程比，对不上就在界面上显示「核对中」——
+   * 那是把正确性押在「后端一定原样回显这个字符串」上：只要它做了任何规整
+   * （trim、大小写、回目录名），这个判断就永远为真，卡片会一直停在「核对中」，
+   * 同时按钮又按 ready 显示成「重新标定」，两边自相矛盾。
+   *
+   * 改成请求序号守卫：只认最后一次发出去的那个请求的返回。不依赖后端回显。
+   */
+  let calibSeq = 0;
+
   async function refreshCalibration() {
     const sess = lesson.value?.lessonId;
     if (!sess) {
       calib.value = null;
       return null;
     }
+    const seq = ++calibSeq;
     try {
-      calib.value = await edgeApi.getCalibrationStatus(sess);
+      const res = await edgeApi.getCalibrationStatus(sess);
+      // 期间又发过一次、或者已经换了课，这次的结果就作废
+      if (seq !== calibSeq || lesson.value?.lessonId !== sess) return calib.value;
+      calib.value = res;
     } catch {
       // 只读接口，拿不到就保持原值；界面按「未知」显示，别当成未标定
     }
@@ -501,7 +509,7 @@ export const useEdgeStore = defineStore("edge", () => {
     cvState, cvSession, cvStateKnown, cvSessionMismatch,
     refreshCv, startCv, stopCv, restartCv,
     calib, calibKnown, calibReady, calibMissing, calibRun, calibRunState,
-    calibRunning, calibratedAt, calibStale,
+    calibRunning, calibratedAt,
     refreshCalibration, runCalibration,
     refresh, refreshRoster, refreshRecord,
     connect, disconnect,
