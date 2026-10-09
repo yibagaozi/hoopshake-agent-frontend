@@ -9,6 +9,7 @@
  */
 import http from "node:http";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 
 const PORT = Number(process.env.MOCK_PORT || 8080);
 
@@ -96,6 +97,70 @@ function calibPayload(session) {
   };
 }
 
+/* ---------- 人脸注册：6 张脸，两张故意没缩略图 ---------- */
+const FACES = Array.from({ length: 6 }, (_, i) => ({
+  localId: `stu_${String(i + 1).padStart(2, "0")}`,
+  globalId: i < 4 ? `g-${i + 1}` : null,
+  hasThumbnail: i < 4,
+  bound: i === 0,
+  boundStudentNo: i === 0 ? "2026060002" : "",
+  boundDisplayName: i === 0 ? "李晓峰" : "",
+}));
+
+/** 缩略图：现画一张带编号的 PNG，尺寸可调，用来验「原图小时放大会不会糊」 */
+const THUMB_PX = Number(process.env.MOCK_THUMB_PX || 240);
+function facePng(seed) {
+  const W = THUMB_PX;
+  const hues = [[255, 106, 44], [47, 177, 112], [76, 141, 214], [138, 107, 214]];
+  const c = hues[seed % hues.length];
+  const rows = [];
+  for (let y = 0; y < W; y++) {
+    const row = [0];
+    for (let x = 0; x < W; x++) {
+      // 斜纹 + 中间一块深色，放大后能一眼看出是不是同一张、糊不糊
+      const band = ((x + y) >> 4) % 2;
+      const mid = Math.abs(x - W / 2) < W / 5 && Math.abs(y - W / 2) < W / 5;
+      const k = mid ? 0.45 : band ? 1 : 0.82;
+      row.push(Math.round(c[0] * k), Math.round(c[1] * k), Math.round(c[2] * k));
+    }
+    rows.push(Buffer.from(row));
+  }
+  const raw = Buffer.concat(rows);
+  const chunk = (tag, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(tag), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body) >>> 0);
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(W, 4);
+  ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+let CRC_T = null;
+function crc32(buf) {
+  if (!CRC_T) {
+    CRC_T = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      CRC_T[n] = c;
+    }
+  }
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_T[(c ^ b) & 0xff] ^ (c >>> 8);
+  return c ^ 0xffffffff;
+}
+
 const routes = {
   "GET /local/state": () =>
     ok({
@@ -147,6 +212,16 @@ const routes = {
     }, Number(process.env.MOCK_CALIB_MS || 2000));
     return ok(calibState.run);
   },
+
+  "GET /local/enroll/status": () =>
+    ok({ session: lesson.lessonId, state: "SUCCEEDED", capturedPersons: 6, message: "注册完成" }),
+
+  "GET /local/enroll/identities": () =>
+    ok({
+      session: lesson.lessonId,
+      enrollCamera: "cam_03",
+      people: FACES,
+    }),
 
   "GET /local/roster": () =>
     ok({ lessonId: lesson.lessonId, syncedAt: startedAt, total: 18, galleryReadyCount: 16, students }),
@@ -211,6 +286,14 @@ const server = http.createServer((req, res) => {
         galleryVersion: n >= 5 ? 2 : null,
         failReason: null,
       }));
+    }
+
+    if (url.pathname === "/local/enroll/thumbnail") {
+      const id = url.searchParams.get("id") || "";
+      const seed = Number(id.replace(/\D/g, "")) || 1;
+      const png = facePng(seed);
+      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+      return res.end(png);
     }
 
     if (url.pathname === "/local/calibration/status") {

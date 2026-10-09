@@ -151,6 +151,75 @@ const pendingCount = computed(() => bindRows.value.filter(isDirty).length);
 
 const thumbUrl = (row) => edgeApi.enrollThumbnailUrl(session.value, row.localId);
 
+/* ---------------- 放大看脸 ---------------- */
+
+/**
+ * 格子里的脸是 110px 见方还裁过（object-fit: cover），光凭它认不出人。
+ * 点开看大图，并且**在大图上就能填学号** —— 不然流程是「开→记住→关→
+ * 回去找那张卡→填」，一个班十几张脸，这几步要重复十几遍。
+ */
+const previewId = ref("");
+
+/** 只有带缩略图的才进翻页序列，没图的点开也没东西看 */
+const faceRows = computed(() => bindRows.value.filter((r) => r.hasThumbnail));
+const previewRow = computed(() => faceRows.value.find((r) => r.localId === previewId.value) || null);
+const previewIdx = computed(() => faceRows.value.findIndex((r) => r.localId === previewId.value));
+
+/**
+ * 缩略图原图可能只有一百来像素，硬撑到 520 会糊成一团。
+ * 最多放到原图的 3 倍，既比格子里大得多，又不至于变成马赛克墙。
+ */
+const MAX_BOX = 520;
+const MIN_BOX = 260;
+const previewBox = ref(MAX_BOX);
+
+function onPreviewLoad(e) {
+  const n = Math.max(e.target.naturalWidth || 0, e.target.naturalHeight || 0);
+  previewBox.value = n ? Math.min(MAX_BOX, Math.max(MIN_BOX, n * 3)) : MAX_BOX;
+}
+
+function openPreview(r) {
+  if (!r.hasThumbnail) return;
+  previewBox.value = MAX_BOX;
+  previewId.value = r.localId;
+}
+
+function closePreview() {
+  previewId.value = "";
+}
+
+function stepPreview(d) {
+  const list = faceRows.value;
+  if (!list.length) return;
+  const i = previewIdx.value;
+  if (i < 0) return;
+  previewBox.value = MAX_BOX;
+  previewId.value = list[(i + d + list.length) % list.length].localId;
+}
+
+function onPreviewKey(e) {
+  if (!previewId.value) return;
+  // 光标在输入框里时，左右键是移动光标，不能拿去翻页；Esc 仍然关闭
+  const typing = /^(INPUT|TEXTAREA)$/.test(e.target?.tagName || "");
+  if (e.key === "Escape") {
+    closePreview();
+  } else if (typing) {
+    return;
+  } else if (e.key === "ArrowLeft") {
+    stepPreview(-1);
+  } else if (e.key === "ArrowRight") {
+    stepPreview(1);
+  } else {
+    return;
+  }
+  e.preventDefault();
+}
+
+// 列表变了（绑完一轮重拉 identities）而当前这张已经不在了，就把大图关掉
+watch(faceRows, (list) => {
+  if (previewId.value && !list.some((r) => r.localId === previewId.value)) closePreview();
+});
+
 async function loadIdentities() {
   if (!session.value) return;
   loadingIdentities.value = true;
@@ -239,11 +308,13 @@ watch(session, (id, prev) => {
 onMounted(() => {
   bootstrap();
   ticker = setInterval(() => (now.value = Date.now()), 1000);
+  window.addEventListener("keydown", onPreviewKey);
 });
 
 onUnmounted(() => {
   clearInterval(poller);
   clearInterval(ticker);
+  window.removeEventListener("keydown", onPreviewKey);
 });
 </script>
 
@@ -361,8 +432,21 @@ onUnmounted(() => {
               class="bind-card"
               :class="{ live: r.live, bound: r.bound }"
             >
-              <div class="face">
+              <div
+                class="face"
+                :class="{ zoomable: r.hasThumbnail }"
+                :title="r.hasThumbnail ? '点开看大图' : ''"
+                @click="openPreview(r)"
+              >
                 <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
+                <span v-if="r.hasThumbnail" class="zoom-ic" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <circle cx="11" cy="11" r="6.4" stroke="#fff" stroke-width="2" />
+                    <line x1="11" y1="8.4" x2="11" y2="13.6" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                    <line x1="8.4" y1="11" x2="13.6" y2="11" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                    <line x1="15.8" y1="15.8" x2="20" y2="20" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                </span>
                 <div v-else class="no-face">
                   <span class="nf-ic">?</span>
                   <span class="nf-t">无缩略图</span>
@@ -398,6 +482,63 @@ onUnmounted(() => {
           </div>
         </template>
       </section>
+    </div>
+
+    <!-- 大图。点背景或按 Esc 关，左右键翻页；学号直接在这儿填，
+         填完回车就提交，不用关掉再去格子里找那张卡 -->
+    <div v-if="previewRow" class="pv-mask" @click.self="closePreview">
+      <div class="pv">
+        <div class="pv-head">
+          <span class="pv-id mono">
+            {{ previewRow.bound && previewRow.boundDisplayName ? previewRow.boundDisplayName : previewRow.localId }}
+          </span>
+          <span v-if="previewRow.live" class="pv-tag live">场上</span>
+          <span v-else-if="previewRow.bound" class="pv-tag bound">已绑 {{ previewRow.boundStudentNo }}</span>
+          <span class="pv-count">{{ previewIdx + 1 }} / {{ faceRows.length }}</span>
+          <button class="pv-x" title="关闭（Esc）" @click="closePreview">✕</button>
+        </div>
+
+        <div class="pv-body">
+          <button
+            v-if="faceRows.length > 1"
+            class="pv-nav"
+            title="上一张（←）"
+            @click="stepPreview(-1)"
+          >
+            ‹
+          </button>
+          <!-- contain 不裁：格子里是 cover，正好把脸的边缘切掉，放大就是为了看全 -->
+          <img
+            :key="previewRow.localId"
+            :src="thumbUrl(previewRow)"
+            :alt="previewRow.localId"
+            class="pv-img"
+            :style="{ width: previewBox + 'px', height: previewBox + 'px' }"
+            @load="onPreviewLoad"
+          />
+          <button
+            v-if="faceRows.length > 1"
+            class="pv-nav"
+            title="下一张（→）"
+            @click="stepPreview(1)"
+          >
+            ›
+          </button>
+        </div>
+
+        <div class="pv-foot">
+          <input
+            v-model="noInput[previewRow.localId]"
+            class="mono pv-input"
+            :class="{ dirty: isDirty(previewRow) }"
+            inputmode="numeric"
+            maxlength="10"
+            placeholder="10 位学号"
+            @keyup.enter="submitBind"
+          />
+          <span class="pv-hint">← → 翻页 · Esc 关闭</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -530,6 +671,174 @@ onUnmounted(() => {
   overflow: hidden;
   background: var(--fill);
   margin-bottom: 10px;
+}
+
+/* 有图才可点；没图的保持默认指针，免得点了没反应 */
+.face.zoomable {
+  cursor: zoom-in;
+}
+
+.zoom-ic {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.face.zoomable:hover .zoom-ic {
+  opacity: 1;
+}
+
+/* ---- 放大看脸 ---- */
+
+.pv-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(18, 18, 20, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.pv {
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 12px;
+}
+
+.pv-id {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pv-tag {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 99px;
+  padding: 3px 9px;
+}
+.pv-tag.live {
+  color: #fff;
+  background: var(--brand);
+}
+.pv-tag.bound {
+  color: var(--ink-3);
+  background: var(--fill-2);
+}
+
+.pv-count {
+  margin-left: auto;
+  font: 500 12px/1 var(--mono);
+  color: var(--ink-6);
+}
+
+.pv-x {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--fill-2);
+  color: var(--ink-4);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pv-x:hover {
+  background: var(--fill);
+  color: var(--ink);
+}
+
+.pv-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.pv-img {
+  /* contain 不裁。格子里是 cover，脸的边缘正好被切掉。
+     尺寸必须用 width/height 写死：只给 max-* 的话小图不会被放大，
+     浏览器会按原始像素渲染，所谓「放大」就等于没放大。 */
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--fill);
+  display: block;
+  max-width: calc(100vw - 140px);
+  max-height: calc(100vh - 220px);
+}
+
+.pv-nav {
+  width: 38px;
+  height: 56px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--fill-2);
+  color: var(--ink-3);
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pv-nav:hover {
+  background: var(--fill);
+  color: var(--ink);
+}
+
+.pv-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.pv-input {
+  flex: 1;
+  height: 42px;
+  border-radius: 11px;
+  border: 1px solid var(--line-3);
+  background: var(--fill);
+  text-align: center;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
+.pv-input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.pv-input.dirty {
+  border-color: var(--brand);
+  background: var(--brand-bg-2);
+}
+
+.pv-hint {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-6);
 }
 
 .face img {
