@@ -31,6 +31,7 @@ export {
   phasesOf,
   phaseLabel,
 } from './vocabulary.js'
+export { BUILD, BUILD_LABEL, BUILD_TITLE } from './build.js'
 export { renderMarkdown } from './markdown.js'
 export { ERROR_MESSAGES, errText, isNotOpen, isQuotaExhausted } from './errors.js'
 export * from './enums.js'

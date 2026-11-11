@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { DOMINANT_HAND, nameInitial } from '@hoopshake/core'
-import { APP_VERSION } from '../version.js'
+import { BUILD_LABEL, BUILD_TITLE } from '@hoopshake/core'
 import BottomSheet from '../components/BottomSheet.vue'
 import { useAuthStore } from '../stores/auth.js'
 import TabBar from '../components/TabBar.vue'
@@ -97,7 +97,7 @@ async function logout() {
       </button>
     </div>
 
-    <div class="ver">Hoopshake 学生端 · v{{ APP_VERSION }}</div>
+    <div class="ver" :title="BUILD_TITLE">Hoopshake 学生端 · {{ BUILD_LABEL }}</div>
     <div style="height: 104px"></div>
   </div>
 

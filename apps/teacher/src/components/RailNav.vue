@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { nameInitial } from '@hoopshake/core'
+import { BUILD_LABEL, BUILD_TITLE, nameInitial } from '@hoopshake/core'
 import { useAuthStore } from '../stores/auth.js'
 
 const route = useRoute()
@@ -93,6 +93,8 @@ async function logout() {
         </button>
       </template>
       <div class="flex1"></div>
+      <!-- 构建版本：排查「线上怎么没有这个功能」时先看它 -->
+      <span class="build" :title="BUILD_TITLE">{{ BUILD_LABEL }}</span>
       <button class="me" :title="auth.displayName + '（点击退出）'" @click="logout">
         {{ nameInitial(auth.displayName) }}
       </button>
@@ -162,6 +164,15 @@ async function logout() {
 }
 .flex1 {
   flex: 1;
+}
+.build {
+  flex: none;
+  font: 500 9px/1.3 var(--mono);
+  color: var(--gray-3);
+  text-align: center;
+  margin-bottom: 8px;
+  word-break: break-all;
+  user-select: all;
 }
 .me {
   width: 40px;

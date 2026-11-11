@@ -7,6 +7,7 @@ import LessonPicker from "./LessonPicker.vue";
 import { useAuthStore } from "@/stores/auth.js";
 import { useEdgeStore } from "@/stores/edge.js";
 import { clock, initial } from "@/utils/format.js";
+import { BUILD_LABEL, BUILD_TITLE } from "@hoopshake/core";
 
 const auth = useAuthStore();
 const edge = useEdgeStore();
@@ -92,6 +93,10 @@ function signOut() {
         <span class="dot warn" />注意 {{ warnCount }}
       </button>
 
+      <!-- 构建版本。线上少了个新功能时，第一件事是看这儿的提交号对不对，
+           不用再去宿主机敲 curl -->
+      <span class="build mono" :title="BUILD_TITLE">{{ BUILD_LABEL }}</span>
+
       <button class="avatar" :title="auth.displayName || '未登录'" @click="signOut">
         {{ auth.signedIn ? initial(auth.displayName) : "—" }}
       </button>
@@ -100,6 +105,14 @@ function signOut() {
 </template>
 
 <style scoped>
+.build {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-6);
+  letter-spacing: 0.02em;
+  cursor: default;
+  user-select: all;
+}
 .bar {
   height: 66px;
   flex: none;

@@ -151,6 +151,28 @@ const pendingCount = computed(() => bindRows.value.filter(isDirty).length);
 
 const thumbUrl = (row) => edgeApi.enrollThumbnailUrl(session.value, row.localId);
 
+/* ---------------- 缩略图有没有 ---------------- */
+
+/**
+ * 以「图到底加载出来没有」为准，不信后端的 hasThumbnail 布尔值。
+ *
+ * 原先整块（显示、可点、翻页序列）都挂在 p.hasThumbnail 上：这个字段要是
+ * 没返回、或者名字对不上，前端就既不显示图也不让点，而缩略图接口其实是
+ * 好的。现在一律先去取图，取回来就能点，404 了才换成占位。
+ * 多出来的代价只是没有图的那几张各发一个 404，可以忽略。
+ */
+const thumbBad = ref(new Set());
+
+const thumbOk = (r) => !thumbBad.value.has(r.localId);
+
+function onThumbError(r) {
+  if (thumbBad.value.has(r.localId)) return;
+  // 换新 Set 才会触发重渲染
+  const next = new Set(thumbBad.value);
+  next.add(r.localId);
+  thumbBad.value = next;
+}
+
 /* ---------------- 放大看脸 ---------------- */
 
 /**
@@ -160,8 +182,8 @@ const thumbUrl = (row) => edgeApi.enrollThumbnailUrl(session.value, row.localId)
  */
 const previewId = ref("");
 
-/** 只有带缩略图的才进翻页序列，没图的点开也没东西看 */
-const faceRows = computed(() => bindRows.value.filter((r) => r.hasThumbnail));
+/** 只有真取到图的才进翻页序列，没图的点开也没东西看 */
+const faceRows = computed(() => bindRows.value.filter(thumbOk));
 const previewRow = computed(() => faceRows.value.find((r) => r.localId === previewId.value) || null);
 const previewIdx = computed(() => faceRows.value.findIndex((r) => r.localId === previewId.value));
 
@@ -179,7 +201,7 @@ function onPreviewLoad(e) {
 }
 
 function openPreview(r) {
-  if (!r.hasThumbnail) return;
+  if (!thumbOk(r)) return;
   previewBox.value = MAX_BOX;
   previewId.value = r.localId;
 }
@@ -227,6 +249,8 @@ async function loadIdentities() {
   try {
     const res = await edgeApi.getEnrollIdentities(session.value);
     enrollCamera.value = res?.enrollCamera || "";
+    // 重跑过采集之后原来没图的可能有了，失败记录作废重试一轮
+    thumbBad.value = new Set();
     identities.value = res?.people || [];
     // 已绑的把学号回填进输入框，老师一眼看到绑的是谁，要改也能直接改
     for (const p of identities.value) {
@@ -434,12 +458,15 @@ onUnmounted(() => {
             >
               <div
                 class="face"
-                :class="{ zoomable: r.hasThumbnail }"
-                :title="r.hasThumbnail ? '点开看大图' : ''"
+                :class="{ zoomable: thumbOk(r) }"
+                :title="thumbOk(r) ? '点开看大图' : ''"
                 @click="openPreview(r)"
               >
-                <img v-if="r.hasThumbnail" :src="thumbUrl(r)" :alt="r.localId" />
-                <span v-if="r.hasThumbnail" class="zoom-ic" aria-hidden="true">
+                <!-- 一律先去取图：取回来就能点，404 了 @error 再换占位。
+                     不拿后端的 hasThumbnail 当开关，那个字段缺了会让好端端的
+                     缩略图既不显示也不能点 -->
+                <img v-show="thumbOk(r)" :src="thumbUrl(r)" alt="" @error="onThumbError(r)" />
+                <span v-if="thumbOk(r)" class="zoom-ic" aria-hidden="true">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <circle cx="11" cy="11" r="6.4" stroke="#fff" stroke-width="2" />
                     <line x1="11" y1="8.4" x2="11" y2="13.6" stroke="#fff" stroke-width="2" stroke-linecap="round" />
@@ -447,7 +474,7 @@ onUnmounted(() => {
                     <line x1="15.8" y1="15.8" x2="20" y2="20" stroke="#fff" stroke-width="2" stroke-linecap="round" />
                   </svg>
                 </span>
-                <div v-else class="no-face">
+                <div v-if="!thumbOk(r)" class="no-face">
                   <span class="nf-ic">?</span>
                   <span class="nf-t">无缩略图</span>
                 </div>

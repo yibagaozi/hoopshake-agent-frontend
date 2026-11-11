@@ -13,10 +13,6 @@ export default defineConfig(({ mode }) => {
     // 子路径部署：构建时传 VITE_BASE_PATH=/student/ 等；缺省为根路径
     base: env.VITE_BASE_PATH || '/',
     plugins: [vue(), buildStamp(pkg.version)],
-    // 「我的」页显示的版本号，取 package.json，免得再硬编码成 v1.0
-    define: {
-      __APP_VERSION__: JSON.stringify(pkg.version),
-    },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

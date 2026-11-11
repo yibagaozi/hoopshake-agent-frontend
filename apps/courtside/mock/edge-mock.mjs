@@ -98,14 +98,21 @@ function calibPayload(session) {
 }
 
 /* ---------- 人脸注册：6 张脸，两张故意没缩略图 ---------- */
-const FACES = Array.from({ length: 6 }, (_, i) => ({
-  localId: `stu_${String(i + 1).padStart(2, "0")}`,
-  globalId: i < 4 ? `g-${i + 1}` : null,
-  hasThumbnail: i < 4,
-  bound: i === 0,
-  boundStudentNo: i === 0 ? "2026060002" : "",
-  boundDisplayName: i === 0 ? "李晓峰" : "",
-}));
+// MOCK_NO_FLAG=1 模拟「后端压根不返回 hasThumbnail」——真机上多半就是这种
+const OMIT_FLAG = !!process.env.MOCK_NO_FLAG;
+const FACES = Array.from({ length: 6 }, (_, i) => {
+  const f = {
+    localId: `stu_${String(i + 1).padStart(2, "0")}`,
+    globalId: i < 4 ? `g-${i + 1}` : null,
+    bound: i === 0,
+    boundStudentNo: i === 0 ? "2026060002" : "",
+    boundDisplayName: i === 0 ? "李晓峰" : "",
+  };
+  if (!OMIT_FLAG) f.hasThumbnail = i < 4;
+  return f;
+});
+/** 只有前 4 个真有图，后 2 个缩略图接口 404 —— 和 hasThumbnail 说什么无关 */
+const HAS_IMG = new Set(["stu_01", "stu_02", "stu_03", "stu_04"]);
 
 /** 缩略图：现画一张带编号的 PNG，尺寸可调，用来验「原图小时放大会不会糊」 */
 const THUMB_PX = Number(process.env.MOCK_THUMB_PX || 240);
@@ -290,6 +297,10 @@ const server = http.createServer((req, res) => {
 
     if (url.pathname === "/local/enroll/thumbnail") {
       const id = url.searchParams.get("id") || "";
+      if (!HAS_IMG.has(id)) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ code: 40400, message: "no thumbnail" }));
+      }
       const seed = Number(id.replace(/\D/g, "")) || 1;
       const png = facePng(seed);
       res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
