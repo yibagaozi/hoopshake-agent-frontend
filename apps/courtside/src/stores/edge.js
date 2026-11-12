@@ -14,6 +14,37 @@ const POSE_STALE_MS = 4000;
 /** WS 原始帧日志上限，供调试页查看 */
 const WS_LOG_LIMIT = 200;
 
+/** 选课时记下云端那份课程名，edge 的课程上下文里没带名字时拿它补 */
+const LS_LESSON_META = "hoopshake.lessonMeta";
+
+function readLessonMeta() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_LESSON_META)) || {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 把 /local/state 里的 lesson 归一成 { lessonId, title, classCode, ... }。
+ *
+ * 状态条原来直接读 lesson.title：edge 只回了 lessonId（它去云端拉上下文没拉到，
+ * 或者字段叫 lessonTitle / name）时，选完课左上角就是空的或 undefined。
+ * 这里字段名各认几种，再不行用选课那一刻记下的名字，最后才退到 id。
+ */
+function normalizeLesson(raw) {
+  const lessonId = raw?.lessonId || raw?.id;
+  if (!lessonId) return null;
+  const meta = readLessonMeta();
+  const hint = meta.lessonId === lessonId ? meta : {};
+  return {
+    ...raw,
+    lessonId,
+    title: raw.title || raw.lessonTitle || raw.name || hint.title || "",
+    classCode: raw.classCode || raw.classNo || raw.className || hint.classCode || "",
+  };
+}
+
 export const useEdgeStore = defineStore("edge", () => {
   /* ---------- 快照数据 ---------- */
   const edgeId = ref("");
@@ -77,6 +108,13 @@ export const useEdgeStore = defineStore("edge", () => {
   const recording = computed(() => sessionState.value === "RECORDING");
   const paused = computed(() => sessionState.value === "PAUSED");
   const hasLesson = computed(() => !!lesson.value?.lessonId);
+  /** 状态条等处显示的课程名：有名字用名字，没有就退到 id 的前 8 位，绝不显示空白 */
+  const lessonLabel = computed(() => {
+    const l = lesson.value;
+    if (!l?.lessonId) return "";
+    const name = l.title || `课程 ${String(l.lessonId).slice(0, 8)}`;
+    return l.classCode ? `${name} · ${l.classCode}班` : name;
+  });
 
   /** 上课计时，从 startedAt 起算；暂停时按接口约定继续走 */
   const elapsedSeconds = computed(() => {
@@ -177,7 +215,7 @@ export const useEdgeStore = defineStore("edge", () => {
     try {
       const s = await edgeApi.getState();
       edgeId.value = s.edgeId;
-      lesson.value = s.lesson?.lessonId ? s.lesson : null;
+      lesson.value = normalizeLesson(s.lesson);
       session.value = s.session;
       cameras.value = s.cameras || [];
       capture.value = s.capture;
@@ -465,9 +503,26 @@ export const useEdgeStore = defineStore("edge", () => {
 
   /* ---------- 课堂控制 ---------- */
 
-  async function selectLesson(lessonId) {
+  /**
+   * @param {string} lessonId
+   * @param {{title?: string, classCode?: string}} [meta] 列表里那条的名字，记下来给状态条兜底
+   */
+  async function selectLesson(lessonId, meta) {
     const res = await edgeApi.selectLesson(lessonId);
+    try {
+      localStorage.setItem(
+        LS_LESSON_META,
+        JSON.stringify({ lessonId, title: meta?.title || "", classCode: meta?.classCode || "" }),
+      );
+    } catch {
+      // 隐私模式等场景忽略
+    }
     await refresh();
+    // /local/state 还没反映出来时（edge 异步去云端拉上下文），先用选课接口的返回顶上，
+    // 否则点完选课左上角还是「未选课程」
+    if (lesson.value?.lessonId !== lessonId) {
+      lesson.value = normalizeLesson({ ...(res?.lesson || res || {}), lessonId });
+    }
     await refreshRoster();
     // 标定产物按课程目录隔离，换课就得按新课重查，旧课的 ready 不作数
     calib.value = null;
@@ -502,7 +557,7 @@ export const useEdgeStore = defineStore("edge", () => {
     pendingBinds, mergePendingBinds, clearPendingBind, clearAllPendingBinds,
     wsStatus, lastError, now,
     wsLog, wsStats, wsChannel, wsDropped, clearWsLog,
-    sessionState, recording, paused, hasLesson,
+    sessionState, recording, paused, hasLesson, lessonLabel,
     elapsedSeconds, recordElapsed,
     camerasHealthy, camerasTotal, camerasDegraded,
     cvAlive, poseAlive, mediamtxReady, ffmpegReady, anchorCamera,

@@ -29,7 +29,7 @@ export const useAuthStore = defineStore("auth", () => {
   async function syncVocabulary() {
     if (!accessToken.value) return;
     try {
-      const v = await cloud.vocabulary(accessToken.value);
+      const v = await withAuth((t) => cloud.vocabulary(t));
       setVocabulary(v);
     } catch {
       // 断云或接口不可用时静默退兜底
@@ -38,17 +38,27 @@ export const useAuthStore = defineStore("auth", () => {
 
   function apply(data, remember) {
     accessToken.value = data.accessToken;
-    user.value = data.user;
+    // refresh 的响应不一定带 user，别拿 undefined 把已有的盖掉
+    if (data.user) user.value = data.user;
     if (remember && data.refreshToken) {
       localStorage.setItem(LS_REFRESH, data.refreshToken);
     }
+  }
+
+  /** 凭证本身被拒（过期、吊销、无效）。连不上云端、网关 502 这些不算 */
+  function isAuthRejected(e) {
+    const c = Number(e?.code) || 0;
+    return (c >= 40100 && c < 40200) || c === 401 || c === 403;
   }
 
   async function signIn(identifier, password, remember = false) {
     loading.value = true;
     error.value = "";
     try {
+      // 没勾「自动登录」就把上一次留下的 refresh token 清掉，否则刷新后照样自动登进去
+      if (!remember) localStorage.removeItem(LS_REFRESH);
       apply(await cloud.login(identifier, password), remember);
+      restoring = null;
       syncVocabulary();
       return true;
     } catch (e) {
@@ -74,7 +84,17 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  /** 用本地 refresh token 静默续期，页面刷新后恢复登录态。整个会话只尝试一次 */
+  /**
+   * 用本地 refresh token 静默续期，页面刷新后恢复登录态。
+   *
+   * 之前「保持登录」不牢靠，毛病出在失败处理上：只要这一次续期没成，
+   * 不管什么原因都把 refresh token 删掉 ——
+   *   - 云端一时连不上 / nginx 回 502：token 明明还有效，被删了，
+   *     之后网络恢复也只能重新输密码；
+   *   - 开了两个操作台标签页：refresh token 是轮换的，两页拿同一个旧 token
+   *     去换，后到的那个必然失败，然后把先到的那页刚存好的**新** token 删掉。
+   * 现在只有云端明确说「凭证无效」才删，而且只删自己试过的那一个。
+   */
   let restoring = null;
 
   function restore() {
@@ -83,17 +103,59 @@ export const useAuthStore = defineStore("auth", () => {
     restoring = (async () => {
       const token = localStorage.getItem(LS_REFRESH);
       if (!token) return false;
+
+      let data;
       try {
-        apply(await cloud.refresh(token), true);
-        syncVocabulary();
-        return true;
-      } catch {
-        localStorage.removeItem(LS_REFRESH);
-        return false;
+        data = await cloud.refresh(token);
+      } catch (e) {
+        const latest = localStorage.getItem(LS_REFRESH);
+        if (latest && latest !== token) {
+          // 另一个标签页已经换过了，用它存的新 token 再试一次
+          try {
+            data = await cloud.refresh(latest);
+          } catch (e2) {
+            if (isAuthRejected(e2) && localStorage.getItem(LS_REFRESH) === latest) {
+              localStorage.removeItem(LS_REFRESH);
+            }
+          }
+        } else if (isAuthRejected(e)) {
+          localStorage.removeItem(LS_REFRESH);
+        }
+        if (!data) {
+          // 网络类失败不算定论，下次进页面/下次请求还能再试
+          restoring = null;
+          return false;
+        }
       }
+
+      apply(data, true);
+      if (!user.value) {
+        try {
+          user.value = await cloud.me(accessToken.value);
+        } catch {
+          // 拿不到资料不影响登录态，只是头像上没名字
+        }
+      }
+      syncVocabulary();
+      return true;
     })();
 
     return restoring;
+  }
+
+  /**
+   * 带登录态调云端。access token 只在内存里、寿命也短，课上到一半过期很正常：
+   * 遇到「未登录/已过期」就用 refresh token 续一次再重放，而不是直接报错。
+   */
+  async function withAuth(call) {
+    try {
+      return await call(accessToken.value);
+    } catch (e) {
+      if (!isAuthRejected(e) || !localStorage.getItem(LS_REFRESH)) throw e;
+      restoring = null;
+      if (!(await restore())) throw e;
+      return call(accessToken.value);
+    }
   }
 
   /** 跳过登录进操作台 */
@@ -116,7 +178,7 @@ export const useAuthStore = defineStore("auth", () => {
   async function loadLessons() {
     error.value = "";
     try {
-      lessons.value = await cloud.listLessons(accessToken.value);
+      lessons.value = await withAuth((t) => cloud.listLessons(t));
     } catch (e) {
       error.value = e.message;
       lessons.value = [];

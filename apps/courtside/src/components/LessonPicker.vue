@@ -16,16 +16,12 @@ const message = ref("");
 const manual = ref(false);
 const form = ref({ lessonId: "", title: "", classCode: "" });
 
-const title = computed(() => {
-  const l = edge.lesson;
-  if (!l?.lessonId) return "未选课程";
-  return l.classCode ? `${l.title} · ${l.classCode}班` : l.title;
-});
+const title = computed(() => edge.lessonLabel || "未选课程");
 
 async function toggle() {
   open.value = !open.value;
   message.value = "";
-  if (open.value && auth.signedIn && !auth.lessons.length) {
+  if (open.value && auth.signedIn) {
     busy.value = true;
     await auth.loadLessons();
     busy.value = false;
@@ -39,7 +35,8 @@ async function pick(lesson) {
   message.value = "";
   try {
     // 只传 lessonId，课程上下文由 edge 自己去云端拉（见 api/edge.js selectLesson）
-    await edge.selectLesson(lesson.lessonId);
+    // 名字一并交给 store 记着：edge 的课程上下文里没带名字时，状态条靠它显示
+    await edge.selectLesson(lesson.lessonId, { title: lesson.title, classCode: lesson.classCode });
     open.value = false;
   } catch (e) {
     message.value = edgeErrText(e);
